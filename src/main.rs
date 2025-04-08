@@ -7,6 +7,8 @@ use std::fs;
 enum TokenType {
     LEFT_PAREN,
     RIGHT_PAREN,
+    LEFT_BRACE,
+    RIGHT_BRACE,
     EOF,
 }
 
@@ -50,8 +52,10 @@ impl TryFrom<char> for Token {
 
     fn try_from(value: char) -> Result<Self, Self::Error> {
         match value {
-            '(' => Ok(Token(TokenType::LEFT_PAREN, "(".to_string(), None)),
-            ')' => Ok(Token(TokenType::RIGHT_PAREN, ")".to_string(), None)),
+            '(' => Ok(Token(TokenType::LEFT_PAREN, value.to_string(), None)),
+            ')' => Ok(Token(TokenType::RIGHT_PAREN, value.to_string(), None)),
+            '{' => Ok(Token(TokenType::LEFT_BRACE, value.to_string(), None)),
+            '}' => Ok(Token(TokenType::RIGHT_BRACE, value.to_string(), None)),
             _ => Err(ScanningError::UnrecognizedToken),
         }
     }
