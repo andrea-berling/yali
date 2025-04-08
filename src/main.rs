@@ -24,6 +24,7 @@ enum TokenType {
     LESS_EQUAL,
     GREATER,
     GREATER_EQUAL,
+    STRING,
     EOF,
 }
 
@@ -60,14 +61,14 @@ impl Display for Token {
 #[derive(Debug)]
 enum ScanningError {
     UnexpectedCharacter(char),
-    UnexpectedString(String),
+    UnterminatedString,
 }
 
 impl Display for ScanningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ScanningError::UnexpectedCharacter(c) => write!(f, "Unexpected character: {}", c),
-            ScanningError::UnexpectedString(s) => write!(f, "Unexpected string: {}", s),
+            ScanningError::UnterminatedString => write!(f, "Unterminated string."),
         }
     }
 }
@@ -132,6 +133,26 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
 
         if c == '>' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token(TokenType::GREATER_EQUAL, ">=".to_string(), None));
+            continue;
+        }
+
+        if c == '"' {
+            let mut string_literal = String::new();
+            while let Some(c) = input_iterator.next() {
+                if c == '"' {
+                    break;
+                }
+                string_literal.push(c);
+            }
+            if input_iterator.peek().is_none() {
+                errors.push((current_line, ScanningError::UnterminatedString));
+                continue;
+            }
+            tokens.push(Token(
+                TokenType::STRING,
+                format!("\"{string_literal}\""),
+                Some(Literal::String(string_literal)),
+            ));
             continue;
         }
 
