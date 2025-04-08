@@ -109,6 +109,12 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
             }
             continue;
         }
+
+        if c == '/' && input_iterator.next_if(|c| *c == '/').is_some() {
+            while input_iterator.next_if(|c| *c != '\n').is_some() {}
+            continue;
+        }
+
         if c == '=' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token(TokenType::EQUAL_EQUAL, "==".to_string(), None));
             continue;
