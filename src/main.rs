@@ -168,10 +168,7 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
 
         if c.is_ascii_digit() {
             let mut number_literal = c.to_string();
-            while let Some(c) = input_iterator.next() {
-                if !c.is_ascii_digit() && c != '.' {
-                    break;
-                }
+            while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_digit() || c == '.') {
                 number_literal.push(c);
             }
             if let Ok(n) = number_literal.parse::<f64>() {
