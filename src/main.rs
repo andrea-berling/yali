@@ -50,7 +50,12 @@ impl Display for Token {
             self.1,
             match self.2 {
                 Some(ref l) => match l {
-                    Literal::Number(n) => n.to_string(),
+                    Literal::Number(n) =>
+                        if n.fract() == 0.0 {
+                            format!("{n}.0")
+                        } else {
+                            n.to_string()
+                        },
                     Literal::String(s) => s.clone(),
                 },
                 None => "null".to_string(),
