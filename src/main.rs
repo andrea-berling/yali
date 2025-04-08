@@ -7,8 +7,45 @@ const KEYWORDS: [&str; 16] = [
     "this", "true", "var", "while",
 ];
 
-#[non_exhaustive]
+enum ASTNode {
+    Expr,
+}
+
+enum Expr {
+    LiteralExpr,
+    Unary,
+    Binary(Box<Expr>, BinaryOp, Box<Expr>),
+    Grouping(Box<Expr>),
+}
+
+enum LiteralExpr {
+    Literal,
+    True,
+    False,
+    Nil,
+}
+
+enum Unary {
+    Minus(Expr),
+    Neg(Expr),
+}
+
+#[allow(non_camel_case_types)]
+enum BinaryOp {
+    EQUAL_EQUAL,
+    BANG_EQUAL,
+    LESS,
+    LESS_EQUAL,
+    GREATER,
+    GREATER_EQUAL,
+    PLUS,
+    MINUS,
+    STAR,
+    SLASH,
+}
+
 #[derive(Debug, Clone)]
+#[allow(non_camel_case_types)]
 enum TokenType {
     LEFT_PAREN,
     RIGHT_PAREN,
@@ -250,6 +287,41 @@ fn scan_identifier_or_keyword(
     }
 }
 
+fn parse(tokens: &[Token]) {
+    for Token(token_type, lexeme, value) in tokens {
+        match token_type {
+            TokenType::LEFT_PAREN => todo!(),
+            TokenType::RIGHT_PAREN => todo!(),
+            TokenType::LEFT_BRACE => todo!(),
+            TokenType::RIGHT_BRACE => todo!(),
+            TokenType::COMMA => todo!(),
+            TokenType::DOT => todo!(),
+            TokenType::MINUS => todo!(),
+            TokenType::PLUS => todo!(),
+            TokenType::SEMICOLON => todo!(),
+            TokenType::SLASH => todo!(),
+            TokenType::STAR => todo!(),
+            TokenType::EQUAL => todo!(),
+            TokenType::EQUAL_EQUAL => todo!(),
+            TokenType::BANG => todo!(),
+            TokenType::BANG_EQUAL => todo!(),
+            TokenType::LESS => todo!(),
+            TokenType::LESS_EQUAL => todo!(),
+            TokenType::GREATER => todo!(),
+            TokenType::GREATER_EQUAL => todo!(),
+            TokenType::STRING => todo!(),
+            TokenType::NUMBER => todo!(),
+            TokenType::IDENTIFIER => todo!(),
+            TokenType::EOF => {
+                break;
+            }
+            TokenType::KEYWORD(keyword) => {
+                println!("{keyword}");
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -280,6 +352,16 @@ fn main() {
             for token in tokens {
                 println!("{}", token);
             }
+        }
+
+        "parse" => {
+            let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
+                eprintln!("Failed to read file {}", filename);
+                String::new()
+            });
+            let (mut tokens, _scanning_errors) = tokenize(&file_contents);
+            tokens.push(EOF_TOKEN.clone());
+            parse(&tokens);
         }
         _ => {
             eprintln!("Unknown command: {}", command);
