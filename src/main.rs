@@ -25,6 +25,7 @@ enum TokenType {
     GREATER,
     GREATER_EQUAL,
     STRING,
+    NUMBER,
     EOF,
 }
 
@@ -62,6 +63,7 @@ impl Display for Token {
 enum ScanningError {
     UnexpectedCharacter(char),
     UnterminatedString,
+    InvalidNumberLiteral,
 }
 
 impl Display for ScanningError {
@@ -69,6 +71,7 @@ impl Display for ScanningError {
         match self {
             ScanningError::UnexpectedCharacter(c) => write!(f, "Unexpected character: {}", c),
             ScanningError::UnterminatedString => write!(f, "Unterminated string."),
+            ScanningError::InvalidNumberLiteral => write!(f, "Invalid number literal."),
         }
     }
 }
@@ -155,6 +158,26 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
                 format!("\"{string_literal}\""),
                 Some(Literal::String(string_literal)),
             ));
+            continue;
+        }
+
+        if c.is_ascii_digit() {
+            let mut number_literal = c.to_string();
+            while let Some(c) = input_iterator.next() {
+                if !c.is_ascii_digit() && c != '.' {
+                    break;
+                }
+                number_literal.push(c);
+            }
+            if let Ok(n) = number_literal.parse::<f64>() {
+                tokens.push(Token(
+                    TokenType::NUMBER,
+                    number_literal,
+                    Some(Literal::Number(n)),
+                ))
+            } else {
+                errors.push((current_line, ScanningError::InvalidNumberLiteral));
+            }
             continue;
         }
 
