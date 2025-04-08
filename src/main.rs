@@ -1,11 +1,80 @@
 use std::env;
+use std::fmt::Display;
 use std::fs;
-use std::io::{self, Write};
+
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+enum TokenType {
+    LEFT_PAREN,
+    RIGHT_PAREN,
+    EOF,
+}
+
+#[non_exhaustive]
+#[derive(Clone)]
+enum Literal {
+    Number(f64),
+    String(String),
+}
+
+#[derive(Clone)]
+struct Token(TokenType, String, Option<Literal>);
+
+const EOF_TOKEN: Token = Token(TokenType::EOF, String::new(), None);
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?} {} {}",
+            self.0,
+            self.1,
+            match self.2 {
+                Some(ref l) => match l {
+                    Literal::Number(n) => n.to_string(),
+                    Literal::String(s) => s.clone(),
+                },
+                None => "null".to_string(),
+            }
+        )
+    }
+}
+
+#[derive(Debug)]
+enum ScanningError {
+    UnrecognizedToken,
+}
+
+impl TryFrom<char> for Token {
+    type Error = ScanningError;
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            '(' => Ok(Token(TokenType::LEFT_PAREN, "(".to_string(), None)),
+            ')' => Ok(Token(TokenType::RIGHT_PAREN, ")".to_string(), None)),
+            _ => Err(ScanningError::UnrecognizedToken),
+        }
+    }
+}
+
+fn tokenize(input: &str) -> Vec<Token> {
+    let mut tokens = vec![];
+    for c in input.chars() {
+        if c.is_whitespace() {
+            continue;
+        }
+        match Token::try_from(c) {
+            Ok(t) => tokens.push(t),
+            Err(e) => panic!("{:?}", e),
+        }
+    }
+    tokens
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        writeln!(io::stderr(), "Usage: {} tokenize <filename>", args[0]).unwrap();
+        eprintln!("Usage: {} tokenize <filename>", args[0]);
         return;
     }
 
@@ -14,24 +83,20 @@ fn main() {
 
     match command.as_str() {
         "tokenize" => {
-            // You can use print statements as follows for debugging, they'll be visible when running tests.
-            writeln!(io::stderr(), "Logs from your program will appear here!").unwrap();
-
             let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
-                writeln!(io::stderr(), "Failed to read file {}", filename).unwrap();
+                eprintln!("Failed to read file {}", filename);
                 String::new()
             });
 
             // Uncomment this block to pass the first stage
-            if !file_contents.is_empty() {
-                panic!("Scanner not implemented");
-            } else {
-                println!("EOF  null"); // Placeholder, remove this line when implementing the scanner
+            let mut tokens = tokenize(&file_contents);
+            tokens.push(EOF_TOKEN.clone());
+            for token in tokens {
+                println!("{}", token);
             }
         }
         _ => {
-            writeln!(io::stderr(), "Unknown command: {}", command).unwrap();
-            return;
+            eprintln!("Unknown command: {}", command);
         }
     }
 }
