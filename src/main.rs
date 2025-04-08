@@ -316,7 +316,11 @@ fn parse(tokens: &[Token]) {
             TokenType::LESS_EQUAL => todo!(),
             TokenType::GREATER => todo!(),
             TokenType::GREATER_EQUAL => todo!(),
-            TokenType::STRING => todo!(),
+            TokenType::STRING => {
+                if let Some(Literal::String(s)) = value {
+                    println!("{s}");
+                }
+            }
             TokenType::NUMBER => {
                 if let Some(l @ Literal::Number(_)) = value {
                     println!("{l}");
