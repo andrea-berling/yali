@@ -16,6 +16,8 @@ enum TokenType {
     SEMICOLON,
     SLASH,
     STAR,
+    EQUAL,
+    EQUAL_EQUAL,
     EOF,
 }
 
@@ -52,12 +54,14 @@ impl Display for Token {
 #[derive(Debug)]
 enum ScanningError {
     UnexpectedCharacter(char),
+    UnexpectedString(String),
 }
 
 impl Display for ScanningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ScanningError::UnexpectedCharacter(c) => write!(f, "Unexpected character: {}", c),
+            ScanningError::UnexpectedString(s) => write!(f, "Unexpected string: {}", s),
         }
     }
 }
@@ -78,6 +82,7 @@ impl TryFrom<char> for Token {
             ';' => Ok(Token(TokenType::SEMICOLON, value.to_string(), None)),
             '/' => Ok(Token(TokenType::SLASH, value.to_string(), None)),
             '*' => Ok(Token(TokenType::STAR, value.to_string(), None)),
+            '=' => Ok(Token(TokenType::EQUAL, value.to_string(), None)),
             _ => Err(ScanningError::UnexpectedCharacter(value)),
         }
     }
@@ -87,11 +92,16 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
     let mut tokens = vec![];
     let mut errors = vec![];
     let mut current_line = 1;
-    for c in input.chars() {
+    let mut input_iterator = input.chars().peekable();
+    while let Some(c) = input_iterator.next() {
         if c.is_whitespace() {
             if c == '\n' {
                 current_line += 1
             }
+            continue;
+        }
+        if c == '=' && input_iterator.next_if(|c| *c == '=').is_some() {
+            tokens.push(Token(TokenType::EQUAL_EQUAL, "==".to_string(), None));
             continue;
         }
         match Token::try_from(c) {
