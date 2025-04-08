@@ -1,6 +1,7 @@
 use std::env;
 use std::fmt::Display;
 use std::fs;
+use std::ops::ControlFlow;
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -26,6 +27,7 @@ enum TokenType {
     GREATER_EQUAL,
     STRING,
     NUMBER,
+    IDENTIFIER,
     EOF,
 }
 
@@ -145,40 +147,25 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
         }
 
         if c == '"' {
-            let mut string_literal = String::new();
-            let mut terminated = false;
-            while let Some(c) = input_iterator.next() {
-                if c == '"' {
-                    terminated = true;
-                    break;
-                }
-                string_literal.push(c);
+            match scan_string_literal(&mut input_iterator) {
+                Ok(t) => tokens.push(t),
+                Err(e) => errors.push((current_line, e)),
             }
-            if input_iterator.peek().is_none() && !terminated {
-                errors.push((current_line, ScanningError::UnterminatedString));
-                continue;
-            }
-            tokens.push(Token(
-                TokenType::STRING,
-                format!("\"{string_literal}\""),
-                Some(Literal::String(string_literal)),
-            ));
             continue;
         }
 
         if c.is_ascii_digit() {
-            let mut number_literal = c.to_string();
-            while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_digit() || c == '.') {
-                number_literal.push(c);
+            match scan_number_literal(&mut input_iterator, c) {
+                Ok(t) => tokens.push(t),
+                Err(e) => errors.push((current_line, e)),
             }
-            if let Ok(n) = number_literal.parse::<f64>() {
-                tokens.push(Token(
-                    TokenType::NUMBER,
-                    number_literal,
-                    Some(Literal::Number(n)),
-                ))
-            } else {
-                errors.push((current_line, ScanningError::InvalidNumberLiteral));
+            continue;
+        }
+
+        if c.is_ascii_alphabetic() || c == '_' {
+            match scan_identifier(&mut input_iterator, c) {
+                Ok(t) => tokens.push(t),
+                Err(e) => errors.push((current_line, e)),
             }
             continue;
         }
@@ -191,6 +178,59 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
         }
     }
     (tokens, errors)
+}
+
+fn scan_string_literal(
+    input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<Token, ScanningError> {
+    let mut string_literal = String::new();
+    let mut terminated = false;
+    while let Some(c) = input_iterator.next() {
+        if c == '"' {
+            terminated = true;
+            break;
+        }
+        string_literal.push(c);
+    }
+    if input_iterator.peek().is_none() && !terminated {
+        Err(ScanningError::UnterminatedString)
+    } else {
+        Ok(Token(
+            TokenType::STRING,
+            format!("\"{string_literal}\""),
+            Some(Literal::String(string_literal)),
+        ))
+    }
+}
+
+fn scan_number_literal(
+    input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    first_digit: char,
+) -> Result<Token, ScanningError> {
+    let mut number_literal = first_digit.to_string();
+    while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_digit() || c == '.') {
+        number_literal.push(c);
+    }
+    if let Ok(n) = number_literal.parse::<f64>() {
+        Ok(Token(
+            TokenType::NUMBER,
+            number_literal,
+            Some(Literal::Number(n)),
+        ))
+    } else {
+        Err(ScanningError::InvalidNumberLiteral)
+    }
+}
+
+fn scan_identifier(
+    input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    first_char: char,
+) -> Result<Token, ScanningError> {
+    let mut identifier = first_char.to_string();
+    while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_alphanumeric() || c == '_') {
+        identifier.push(c);
+    }
+    Ok(Token(TokenType::IDENTIFIER, identifier, None))
 }
 
 fn main() {
