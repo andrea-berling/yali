@@ -128,7 +128,7 @@ fn main() {
             if !scanning_errors.is_empty() {
                 exit_code = 65;
                 for (line, err) in scanning_errors {
-                    println!("[line {}] Error: {}", line, err);
+                    eprintln!("[line {}] Error: {}", line, err);
                 }
             }
             for token in tokens {
