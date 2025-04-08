@@ -51,7 +51,15 @@ impl Display for Token {
 
 #[derive(Debug)]
 enum ScanningError {
-    UnrecognizedToken,
+    UnexpectedCharacter(char),
+}
+
+impl Display for ScanningError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScanningError::UnexpectedCharacter(c) => write!(f, "Unexpected character: {}", c),
+        }
+    }
 }
 
 impl TryFrom<char> for Token {
@@ -70,23 +78,30 @@ impl TryFrom<char> for Token {
             ';' => Ok(Token(TokenType::SEMICOLON, value.to_string(), None)),
             '/' => Ok(Token(TokenType::SLASH, value.to_string(), None)),
             '*' => Ok(Token(TokenType::STAR, value.to_string(), None)),
-            _ => Err(ScanningError::UnrecognizedToken),
+            _ => Err(ScanningError::UnexpectedCharacter(value)),
         }
     }
 }
 
-fn tokenize(input: &str) -> Vec<Token> {
+fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
     let mut tokens = vec![];
+    let mut errors = vec![];
+    let mut current_line = 1;
     for c in input.chars() {
         if c.is_whitespace() {
+            if c == '\n' {
+                current_line += 1
+            }
             continue;
         }
         match Token::try_from(c) {
-            Ok(t) => tokens.push(t),
-            Err(e) => panic!("{:?}", e),
+            Ok(token) => tokens.push(token),
+            Err(err) => {
+                errors.push((current_line, err));
+            }
         }
     }
-    tokens
+    (tokens, errors)
 }
 
 fn main() {
@@ -98,6 +113,7 @@ fn main() {
 
     let command = &args[1];
     let filename = &args[2];
+    let mut exit_code = 0;
 
     match command.as_str() {
         "tokenize" => {
@@ -107,8 +123,14 @@ fn main() {
             });
 
             // Uncomment this block to pass the first stage
-            let mut tokens = tokenize(&file_contents);
+            let (mut tokens, scanning_errors) = tokenize(&file_contents);
             tokens.push(EOF_TOKEN.clone());
+            if !scanning_errors.is_empty() {
+                exit_code = 65;
+                for (line, err) in scanning_errors {
+                    println!("[line {}] Error: {}", line, err);
+                }
+            }
             for token in tokens {
                 println!("{}", token);
             }
@@ -117,4 +139,5 @@ fn main() {
             eprintln!("Unknown command: {}", command);
         }
     }
+    std::process::exit(exit_code)
 }
