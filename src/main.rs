@@ -9,6 +9,13 @@ enum TokenType {
     RIGHT_PAREN,
     LEFT_BRACE,
     RIGHT_BRACE,
+    COMMA,
+    DOT,
+    MINUS,
+    PLUS,
+    SEMICOLON,
+    SLASH,
+    STAR,
     EOF,
 }
 
@@ -56,6 +63,13 @@ impl TryFrom<char> for Token {
             ')' => Ok(Token(TokenType::RIGHT_PAREN, value.to_string(), None)),
             '{' => Ok(Token(TokenType::LEFT_BRACE, value.to_string(), None)),
             '}' => Ok(Token(TokenType::RIGHT_BRACE, value.to_string(), None)),
+            ',' => Ok(Token(TokenType::COMMA, value.to_string(), None)),
+            '.' => Ok(Token(TokenType::DOT, value.to_string(), None)),
+            '-' => Ok(Token(TokenType::MINUS, value.to_string(), None)),
+            '+' => Ok(Token(TokenType::PLUS, value.to_string(), None)),
+            ';' => Ok(Token(TokenType::SEMICOLON, value.to_string(), None)),
+            '/' => Ok(Token(TokenType::SLASH, value.to_string(), None)),
+            '*' => Ok(Token(TokenType::STAR, value.to_string(), None)),
             _ => Err(ScanningError::UnrecognizedToken),
         }
     }
