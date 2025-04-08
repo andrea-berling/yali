@@ -1,7 +1,11 @@
 use std::env;
 use std::fmt::Display;
 use std::fs;
-use std::ops::ControlFlow;
+
+const KEYWORDS: [&str; 16] = [
+    "and", "class", "else", "false", "for", "fun", "if", "nil", "or", "print", "return", "super",
+    "this", "true", "var", "while",
+];
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -29,6 +33,7 @@ enum TokenType {
     NUMBER,
     IDENTIFIER,
     EOF,
+    KEYWORD(String),
 }
 
 #[non_exhaustive]
@@ -47,8 +52,12 @@ impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:?} {} {}",
-            self.0,
+            "{} {} {}",
+            if let TokenType::KEYWORD(keyword) = &self.0 {
+                keyword.to_uppercase()
+            } else {
+                format!("{:?}", self.0)
+            },
             self.1,
             match self.2 {
                 Some(ref l) => match l {
@@ -163,7 +172,7 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
         }
 
         if c.is_ascii_alphabetic() || c == '_' {
-            match scan_identifier(&mut input_iterator, c) {
+            match scan_identifier_or_keyword(&mut input_iterator, c) {
                 Ok(t) => tokens.push(t),
                 Err(e) => errors.push((current_line, e)),
             }
@@ -222,7 +231,7 @@ fn scan_number_literal(
     }
 }
 
-fn scan_identifier(
+fn scan_identifier_or_keyword(
     input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
     first_char: char,
 ) -> Result<Token, ScanningError> {
@@ -230,7 +239,15 @@ fn scan_identifier(
     while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_alphanumeric() || c == '_') {
         identifier.push(c);
     }
-    Ok(Token(TokenType::IDENTIFIER, identifier, None))
+    if KEYWORDS.contains(&identifier.as_str()) {
+        Ok(Token(
+            TokenType::KEYWORD(identifier.clone()),
+            identifier,
+            None,
+        ))
+    } else {
+        Ok(Token(TokenType::IDENTIFIER, identifier, None))
+    }
 }
 
 fn main() {
