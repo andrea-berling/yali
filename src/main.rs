@@ -18,6 +18,8 @@ enum TokenType {
     STAR,
     EQUAL,
     EQUAL_EQUAL,
+    BANG,
+    BANG_EQUAL,
     EOF,
 }
 
@@ -83,6 +85,7 @@ impl TryFrom<char> for Token {
             '/' => Ok(Token(TokenType::SLASH, value.to_string(), None)),
             '*' => Ok(Token(TokenType::STAR, value.to_string(), None)),
             '=' => Ok(Token(TokenType::EQUAL, value.to_string(), None)),
+            '!' => Ok(Token(TokenType::BANG, value.to_string(), None)),
             _ => Err(ScanningError::UnexpectedCharacter(value)),
         }
     }
@@ -102,6 +105,11 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
         }
         if c == '=' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token(TokenType::EQUAL_EQUAL, "==".to_string(), None));
+            continue;
+        }
+
+        if c == '!' && input_iterator.next_if(|c| *c == '=').is_some() {
+            tokens.push(Token(TokenType::BANG_EQUAL, "!=".to_string(), None));
             continue;
         }
         match Token::try_from(c) {
