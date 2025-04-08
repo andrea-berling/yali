@@ -80,6 +80,21 @@ enum Literal {
     String(String),
 }
 
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Number(n) => {
+                if n.fract() == 0.0 {
+                    write!(f, "{n}.0")
+                } else {
+                    write!(f, "{n}")
+                }
+            }
+            Literal::String(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Token(TokenType, String, Option<Literal>);
 
@@ -97,15 +112,7 @@ impl Display for Token {
             },
             self.1,
             match self.2 {
-                Some(ref l) => match l {
-                    Literal::Number(n) =>
-                        if n.fract() == 0.0 {
-                            format!("{n}.0")
-                        } else {
-                            n.to_string()
-                        },
-                    Literal::String(s) => s.clone(),
-                },
+                Some(ref l) => format!("{l}"),
                 None => "null".to_string(),
             }
         )
@@ -311,8 +318,8 @@ fn parse(tokens: &[Token]) {
             TokenType::GREATER_EQUAL => todo!(),
             TokenType::STRING => todo!(),
             TokenType::NUMBER => {
-                if let Some(Literal::Number(n)) = value {
-                    println!("{n}");
+                if let Some(l @ Literal::Number(_)) = value {
+                    println!("{l}");
                 }
             }
             TokenType::IDENTIFIER => todo!(),
