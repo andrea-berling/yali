@@ -310,7 +310,11 @@ fn parse(tokens: &[Token]) {
             TokenType::GREATER => todo!(),
             TokenType::GREATER_EQUAL => todo!(),
             TokenType::STRING => todo!(),
-            TokenType::NUMBER => todo!(),
+            TokenType::NUMBER => {
+                if let Some(Literal::Number(n)) = value {
+                    println!("{n}");
+                }
+            }
             TokenType::IDENTIFIER => todo!(),
             TokenType::EOF => {
                 break;
