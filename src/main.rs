@@ -138,13 +138,15 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
 
         if c == '"' {
             let mut string_literal = String::new();
+            let mut terminated = false;
             while let Some(c) = input_iterator.next() {
                 if c == '"' {
+                    terminated = true;
                     break;
                 }
                 string_literal.push(c);
             }
-            if input_iterator.peek().is_none() {
+            if input_iterator.peek().is_none() && !terminated {
                 errors.push((current_line, ScanningError::UnterminatedString));
                 continue;
             }
@@ -185,8 +187,6 @@ fn main() {
             });
 
             // Uncomment this block to pass the first stage
-            let bytes = bytes::Bytes::from(file_contents.clone());
-            println!("{:#x}", bytes);
             let (mut tokens, scanning_errors) = tokenize(&file_contents);
             tokens.push(EOF_TOKEN.clone());
             if !scanning_errors.is_empty() {
