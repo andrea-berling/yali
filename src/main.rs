@@ -187,6 +187,7 @@ fn main() {
             // Uncomment this block to pass the first stage
             let (mut tokens, scanning_errors) = tokenize(&file_contents);
             tokens.push(EOF_TOKEN.clone());
+            eprintln!("Hello");
             if !scanning_errors.is_empty() {
                 exit_code = 65;
                 for (line, err) in scanning_errors {
