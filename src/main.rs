@@ -20,6 +20,10 @@ enum TokenType {
     EQUAL_EQUAL,
     BANG,
     BANG_EQUAL,
+    LESS,
+    LESS_EQUAL,
+    GREATER,
+    GREATER_EQUAL,
     EOF,
 }
 
@@ -86,6 +90,8 @@ impl TryFrom<char> for Token {
             '*' => Ok(Token(TokenType::STAR, value.to_string(), None)),
             '=' => Ok(Token(TokenType::EQUAL, value.to_string(), None)),
             '!' => Ok(Token(TokenType::BANG, value.to_string(), None)),
+            '<' => Ok(Token(TokenType::LESS, value.to_string(), None)),
+            '>' => Ok(Token(TokenType::GREATER, value.to_string(), None)),
             _ => Err(ScanningError::UnexpectedCharacter(value)),
         }
     }
@@ -112,6 +118,17 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
             tokens.push(Token(TokenType::BANG_EQUAL, "!=".to_string(), None));
             continue;
         }
+
+        if c == '<' && input_iterator.next_if(|c| *c == '=').is_some() {
+            tokens.push(Token(TokenType::LESS_EQUAL, "<=".to_string(), None));
+            continue;
+        }
+
+        if c == '>' && input_iterator.next_if(|c| *c == '=').is_some() {
+            tokens.push(Token(TokenType::GREATER_EQUAL, ">=".to_string(), None));
+            continue;
+        }
+
         match Token::try_from(c) {
             Ok(token) => tokens.push(token),
             Err(err) => {
