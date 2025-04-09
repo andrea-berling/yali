@@ -7,29 +7,34 @@ const KEYWORDS: [&str; 16] = [
     "this", "true", "var", "while",
 ];
 
-enum ASTNode {
-    Expr,
+#[derive(Debug)]
+enum AST {
+    Expr(Expr),
 }
 
+#[derive(Debug)]
 enum Expr {
-    LiteralExpr,
-    Unary,
+    Literal(LiteralExpr),
+    Unary(Unary),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Grouping(Box<Expr>),
 }
 
+#[derive(Debug)]
 enum LiteralExpr {
-    Literal,
+    Lit(Literal),
     True,
     False,
     Nil,
 }
 
+#[derive(Debug)]
 enum Unary {
-    Minus(Expr),
-    Neg(Expr),
+    Minus(Box<Expr>),
+    Neg(Box<Expr>),
 }
 
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 enum BinaryOp {
     EQUAL_EQUAL,
@@ -74,7 +79,7 @@ enum TokenType {
 }
 
 #[non_exhaustive]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Literal {
     Number(f64),
     String(String),
@@ -124,6 +129,15 @@ enum ScanningError {
     UnexpectedCharacter(char),
     UnterminatedString,
     InvalidNumberLiteral,
+}
+
+#[derive(Debug)]
+enum ParsingError {
+    UnparsedTokens,
+    NothingToParse,
+    TokenTypeMismatch,
+    UnexpectedToken,
+    UbalancedGrouping,
 }
 
 impl Display for ScanningError {
@@ -233,6 +247,77 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
     (tokens, errors)
 }
 
+trait Visit {
+    fn visit_ast(&self, ast: AST) {
+        match ast {
+            AST::Expr(expr) => self.visit_expr(expr),
+        }
+    }
+
+    fn visit_expr(&self, expr: Expr) {
+        match expr {
+            Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
+            Expr::Unary(unary) => self.visit_unary(unary),
+            Expr::Binary(expr, binary_op, expr1) => {
+                self.visit_expr(*expr);
+                self.visit_binary_op(binary_op);
+                self.visit_expr(*expr1);
+            }
+            Expr::Grouping(expr) => self.visit_grouping(*expr),
+        }
+    }
+
+    fn visit_expr_literal(&self, literal_expr: LiteralExpr) {
+        if let LiteralExpr::Lit(literal) = literal_expr {
+            self.visit_literal(literal);
+        }
+    }
+
+    fn visit_literal(&self, literal: Literal) {}
+
+    fn visit_unary(&self, unary: Unary) {
+        match unary {
+            Unary::Minus(expr) => self.visit_expr(*expr),
+            Unary::Neg(expr) => self.visit_expr(*expr),
+        }
+    }
+
+    fn visit_binary_op(&self, binary_op: BinaryOp) {}
+
+    fn visit_grouping(&self, expr: Expr) {
+        self.visit_expr(expr);
+    }
+}
+
+pub struct AstPrinter;
+
+impl Visit for AstPrinter {
+    fn visit_expr_literal(&self, literal_expr: LiteralExpr) {
+        print!(
+            "{}",
+            match literal_expr {
+                LiteralExpr::Lit(literal) => format!("{literal}"),
+                LiteralExpr::True => "true".to_string(),
+                LiteralExpr::False => "false".to_string(),
+                LiteralExpr::Nil => "nil".to_string(),
+            }
+        )
+    }
+
+    fn visit_grouping(&self, expr: Expr) {
+        print!("(group ");
+        self.visit_expr(expr);
+        print!(")")
+    }
+
+    fn visit_ast(&self, ast: AST) {
+        match ast {
+            AST::Expr(expr) => self.visit_expr(expr),
+        }
+        println!();
+    }
+}
+
 fn scan_string_literal(
     input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
 ) -> Result<Token, ScanningError> {
@@ -294,47 +379,64 @@ fn scan_identifier_or_keyword(
     }
 }
 
-fn parse(tokens: &[Token]) {
-    for Token(token_type, lexeme, value) in tokens {
-        match token_type {
-            TokenType::LEFT_PAREN => todo!(),
-            TokenType::RIGHT_PAREN => todo!(),
-            TokenType::LEFT_BRACE => todo!(),
-            TokenType::RIGHT_BRACE => todo!(),
-            TokenType::COMMA => todo!(),
-            TokenType::DOT => todo!(),
-            TokenType::MINUS => todo!(),
-            TokenType::PLUS => todo!(),
-            TokenType::SEMICOLON => todo!(),
-            TokenType::SLASH => todo!(),
-            TokenType::STAR => todo!(),
-            TokenType::EQUAL => todo!(),
-            TokenType::EQUAL_EQUAL => todo!(),
-            TokenType::BANG => todo!(),
-            TokenType::BANG_EQUAL => todo!(),
-            TokenType::LESS => todo!(),
-            TokenType::LESS_EQUAL => todo!(),
-            TokenType::GREATER => todo!(),
-            TokenType::GREATER_EQUAL => todo!(),
-            TokenType::STRING => {
-                if let Some(Literal::String(s)) = value {
-                    println!("{s}");
-                }
-            }
-            TokenType::NUMBER => {
-                if let Some(l @ Literal::Number(_)) = value {
-                    println!("{l}");
-                }
-            }
-            TokenType::IDENTIFIER => todo!(),
-            TokenType::EOF => {
-                break;
-            }
-            TokenType::KEYWORD(keyword) => {
-                println!("{keyword}");
+fn parse_expr<'a>(
+    tokens_iterator: &mut impl Iterator<Item = &'a Token>,
+) -> Result<Expr, ParsingError> {
+    let Some(Token(token_type, lexeme, value)) = tokens_iterator.next() else {
+        return Err(ParsingError::NothingToParse);
+    };
+
+    match token_type {
+        TokenType::STRING => {
+            if let Some(l @ Literal::String(_)) = value {
+                Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
+            } else {
+                Err(ParsingError::TokenTypeMismatch)
             }
         }
+        TokenType::NUMBER => {
+            if let Some(l @ Literal::Number(_)) = value {
+                Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
+            } else {
+                Err(ParsingError::TokenTypeMismatch)
+            }
+        }
+
+        TokenType::KEYWORD(keyword) => {
+            if keyword == "true" {
+                Ok(Expr::Literal(LiteralExpr::True))
+            } else if keyword == "false" {
+                Ok(Expr::Literal(LiteralExpr::False))
+            } else if keyword == "nil" {
+                Ok(Expr::Literal(LiteralExpr::Nil))
+            } else {
+                todo!()
+            }
+        }
+        TokenType::LEFT_PAREN => {
+            let expr = parse_expr(tokens_iterator)?;
+            if !tokens_iterator
+                .next()
+                .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::RIGHT_PAREN))
+            {
+                return Err(ParsingError::UbalancedGrouping);
+            }
+            Ok(Expr::Grouping(Box::new(expr)))
+        }
+        _ => Err(ParsingError::UnexpectedToken),
     }
+}
+
+fn parse(tokens: &[Token]) -> Result<AST, ParsingError> {
+    let mut tokens_iterator = tokens.iter();
+    let expr = parse_expr(&mut tokens_iterator)?;
+    if !tokens_iterator
+        .next()
+        .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::EOF))
+    {
+        return Err(ParsingError::UnparsedTokens);
+    }
+    Ok(AST::Expr(expr))
 }
 
 fn main() {
@@ -376,7 +478,12 @@ fn main() {
             });
             let (mut tokens, _scanning_errors) = tokenize(&file_contents);
             tokens.push(EOF_TOKEN.clone());
-            parse(&tokens);
+            match parse(&tokens) {
+                Ok(ast) => {
+                    AstPrinter.visit_ast(ast);
+                }
+                Err(err) => println!("{err:?}"),
+            }
         }
         _ => {
             eprintln!("Unknown command: {}", command);
