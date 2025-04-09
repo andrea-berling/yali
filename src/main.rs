@@ -51,11 +51,23 @@ enum BinaryOp {
     SLASH,
 }
 
-fn precedence_level(op: &BinaryOp) -> u8 {
-    match op {
-        BinaryOp::STAR | BinaryOp::SLASH => 1,
-        BinaryOp::MINUS | BinaryOp::PLUS => 0,
-        _ => todo!(),
+trait HasPrecedence {
+    fn precedence_level(&self) -> i8;
+}
+
+impl HasPrecedence for BinaryOp {
+    fn precedence_level(&self) -> i8 {
+        match self {
+            BinaryOp::STAR | BinaryOp::SLASH => 1,
+            BinaryOp::MINUS | BinaryOp::PLUS => 0,
+            _ => todo!(),
+        }
+    }
+}
+
+impl HasPrecedence for Unary {
+    fn precedence_level(&self) -> i8 {
+        i8::MAX
     }
 }
 
@@ -147,7 +159,7 @@ enum ParsingError {
     NothingToParse,
     TokenTypeMismatch,
     UnexpectedToken,
-    UbalancedGrouping,
+    UnbalancedGrouping,
     MalformedBinaryOperation,
     InvalidExpression,
 }
@@ -438,7 +450,7 @@ fn scan_identifier_or_keyword(
 
 fn parse_expr<'a>(
     tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
-    previous_operators_stack: &mut VecDeque<BinaryOp>,
+    previous_operators_precedences_stack: &mut VecDeque<i8>,
 ) -> Result<Expr, ParsingError> {
     let Some(Token(token_type, _lexeme, value)) = tokens_iterator.next() else {
         return Err(ParsingError::NothingToParse);
@@ -472,21 +484,28 @@ fn parse_expr<'a>(
             }
         }
         TokenType::LEFT_PAREN => {
-            let expr = parse_expr(tokens_iterator, previous_operators_stack)?;
+            previous_operators_precedences_stack.push_front(i8::MIN);
+            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            println!("{expr:#?}");
             if !tokens_iterator
                 .next()
                 .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::RIGHT_PAREN))
             {
-                return Err(ParsingError::UbalancedGrouping);
+                return Err(ParsingError::UnbalancedGrouping);
             }
+            previous_operators_precedences_stack.pop_front();
             Ok(Expr::Grouping(Box::new(expr)))
         }
         TokenType::BANG => {
-            let expr = parse_expr(tokens_iterator, previous_operators_stack)?;
+            previous_operators_precedences_stack.push_front(i8::MAX);
+            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            previous_operators_precedences_stack.pop_front();
             Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
         }
         TokenType::MINUS => {
-            let expr = parse_expr(tokens_iterator, previous_operators_stack)?;
+            previous_operators_precedences_stack.push_front(i8::MAX);
+            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            previous_operators_precedences_stack.pop_front();
             Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
         }
         _ => Err(ParsingError::UnexpectedToken),
@@ -503,19 +522,19 @@ fn parse_expr<'a>(
                 _ => None,
             })
     {
-        if previous_operators_stack.is_empty()
-            || previous_operators_stack
+        if previous_operators_precedences_stack.is_empty()
+            || previous_operators_precedences_stack
                 .front()
-                .is_some_and(|previous_operator| {
-                    precedence_level(&next_binary_operator) > precedence_level(previous_operator)
+                .is_some_and(|previous_precedence| {
+                    next_binary_operator.precedence_level() > *previous_precedence
                 })
         {
             let binary_operator = parse_binary_operator(tokens_iterator)?;
 
-            previous_operators_stack.push_front(binary_operator);
-            let expr2 = parse_expr(tokens_iterator, previous_operators_stack)?;
+            previous_operators_precedences_stack.push_front(binary_operator.precedence_level());
+            let expr2 = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
 
-            previous_operators_stack.pop_front();
+            previous_operators_precedences_stack.pop_front();
             expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
         } else {
             break;
