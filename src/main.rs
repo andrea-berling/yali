@@ -58,12 +58,14 @@ trait HasPrecedence {
 impl HasPrecedence for BinaryOp {
     fn precedence_level(&self) -> i8 {
         match self {
-            BinaryOp::LESS | BinaryOp::GREATER | BinaryOp::LESS_EQUAL | BinaryOp::GREATER_EQUAL => {
-                2
-            }
+            BinaryOp::LESS
+            | BinaryOp::GREATER
+            | BinaryOp::LESS_EQUAL
+            | BinaryOp::GREATER_EQUAL
+            | BinaryOp::EQUAL_EQUAL
+            | BinaryOp::BANG_EQUAL => 2,
             BinaryOp::STAR | BinaryOp::SLASH => 1,
             BinaryOp::MINUS | BinaryOp::PLUS => 0,
-            _ => todo!(),
         }
     }
 }
@@ -553,6 +555,8 @@ fn parse_binary_operator<'a>(
         TokenType::LESS => Ok(BinaryOp::LESS),
         TokenType::GREATER_EQUAL => Ok(BinaryOp::GREATER_EQUAL),
         TokenType::LESS_EQUAL => Ok(BinaryOp::LESS_EQUAL),
+        TokenType::EQUAL_EQUAL => Ok(BinaryOp::EQUAL_EQUAL),
+        TokenType::BANG_EQUAL => Ok(BinaryOp::BANG_EQUAL),
         _ => Err(ParsingError::InvalidExpression),
     }
 }
