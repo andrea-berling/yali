@@ -1,6 +1,7 @@
 use std::env;
 use std::fmt::Display;
 use std::fs;
+use std::iter::Peekable;
 
 const KEYWORDS: [&str; 16] = [
     "and", "class", "else", "false", "for", "fun", "if", "nil", "or", "print", "return", "super",
@@ -138,6 +139,8 @@ enum ParsingError {
     TokenTypeMismatch,
     UnexpectedToken,
     UbalancedGrouping,
+    MalformedBinaryOperation,
+    InvalidExpression,
 }
 
 impl Display for ScanningError {
@@ -333,6 +336,34 @@ impl Visit for AstPrinter {
         }
         println!();
     }
+
+    fn visit_expr(&self, expr: Expr) {
+        match expr {
+            Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
+            Expr::Unary(unary) => self.visit_unary(unary),
+            Expr::Binary(expr, binary_op, expr1) => {
+                print!("(");
+                match binary_op {
+                    BinaryOp::EQUAL_EQUAL => print!("=="),
+                    BinaryOp::BANG_EQUAL => print!("!="),
+                    BinaryOp::LESS => print!("<"),
+                    BinaryOp::LESS_EQUAL => print!("<="),
+                    BinaryOp::GREATER => print!(">"),
+                    BinaryOp::GREATER_EQUAL => print!(">="),
+                    BinaryOp::PLUS => print!("+"),
+                    BinaryOp::MINUS => print!("-"),
+                    BinaryOp::STAR => print!("*"),
+                    BinaryOp::SLASH => print!("/"),
+                }
+                print!(" ");
+                self.visit_expr(*expr);
+                print!(" ");
+                self.visit_expr(*expr1);
+                print!(")");
+            }
+            Expr::Grouping(expr) => self.visit_grouping(*expr),
+        }
+    }
 }
 
 fn scan_string_literal(
@@ -397,13 +428,14 @@ fn scan_identifier_or_keyword(
 }
 
 fn parse_expr<'a>(
-    tokens_iterator: &mut impl Iterator<Item = &'a Token>,
+    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
+    parse_single_expr: bool,
 ) -> Result<Expr, ParsingError> {
-    let Some(Token(token_type, lexeme, value)) = tokens_iterator.next() else {
+    let Some(Token(token_type, _lexeme, value)) = tokens_iterator.next() else {
         return Err(ParsingError::NothingToParse);
     };
 
-    match token_type {
+    let mut expr = match token_type {
         TokenType::STRING => {
             if let Some(l @ Literal::String(_)) = value {
                 Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
@@ -431,7 +463,7 @@ fn parse_expr<'a>(
             }
         }
         TokenType::LEFT_PAREN => {
-            let expr = parse_expr(tokens_iterator)?;
+            let expr = parse_expr(tokens_iterator, false)?;
             if !tokens_iterator
                 .next()
                 .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::RIGHT_PAREN))
@@ -441,20 +473,51 @@ fn parse_expr<'a>(
             Ok(Expr::Grouping(Box::new(expr)))
         }
         TokenType::BANG => {
-            let expr = parse_expr(tokens_iterator)?;
+            let expr = parse_expr(tokens_iterator, true)?;
             Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
         }
         TokenType::MINUS => {
-            let expr = parse_expr(tokens_iterator)?;
+            let expr = parse_expr(tokens_iterator, true)?;
             Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
         }
         _ => Err(ParsingError::UnexpectedToken),
+    }?;
+
+    while !parse_single_expr
+        && tokens_iterator
+            .peek()
+            .is_some_and(|&Token(next_token_type, _, _)| {
+                matches!(
+                    next_token_type,
+                    TokenType::STAR | TokenType::SLASH | TokenType::PLUS | TokenType::MINUS
+                )
+            })
+    {
+        let binary_operator = parse_binary_operator(tokens_iterator)?;
+        let expr2 = parse_expr(tokens_iterator, true)?;
+        expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
+    }
+    Ok(expr)
+}
+
+fn parse_binary_operator<'a>(
+    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
+) -> Result<BinaryOp, ParsingError> {
+    let Some(Token(token_type, _, _)) = tokens_iterator.next() else {
+        return Err(ParsingError::NothingToParse);
+    };
+    match token_type {
+        TokenType::MINUS => Ok(BinaryOp::MINUS),
+        TokenType::PLUS => Ok(BinaryOp::PLUS),
+        TokenType::STAR => Ok(BinaryOp::STAR),
+        TokenType::SLASH => Ok(BinaryOp::SLASH),
+        _ => Err(ParsingError::InvalidExpression),
     }
 }
 
-fn parse(tokens: &[Token]) -> Result<AST, ParsingError> {
-    let mut tokens_iterator = tokens.iter();
-    let expr = parse_expr(&mut tokens_iterator)?;
+fn parse_ast(tokens: &[Token]) -> Result<AST, ParsingError> {
+    let mut tokens_iterator = tokens.iter().peekable();
+    let expr = parse_expr(&mut tokens_iterator, false)?;
     if !tokens_iterator
         .next()
         .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::EOF))
@@ -503,7 +566,7 @@ fn main() {
             });
             let (mut tokens, _scanning_errors) = tokenize(&file_contents);
             tokens.push(EOF_TOKEN.clone());
-            match parse(&tokens) {
+            match parse_ast(&tokens) {
                 Ok(ast) => {
                     AstPrinter.visit_ast(ast);
                 }
