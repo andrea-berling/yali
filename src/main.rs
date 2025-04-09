@@ -486,7 +486,6 @@ fn parse_expr<'a>(
         TokenType::LEFT_PAREN => {
             previous_operators_precedences_stack.push_front(i8::MIN);
             let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-            println!("{expr:#?}");
             if !tokens_iterator
                 .next()
                 .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::RIGHT_PAREN))
