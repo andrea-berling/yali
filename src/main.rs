@@ -310,6 +310,23 @@ impl Visit for AstPrinter {
         print!(")")
     }
 
+    fn visit_unary(&self, unary: Unary) {
+        print!("(");
+        let expr = match unary {
+            Unary::Minus(expr) => {
+                print!("-");
+                expr
+            }
+            Unary::Neg(expr) => {
+                print!("!");
+                expr
+            }
+        };
+        print!(" ");
+        self.visit_expr(*expr);
+        print!(")");
+    }
+
     fn visit_ast(&self, ast: AST) {
         match ast {
             AST::Expr(expr) => self.visit_expr(expr),
@@ -422,6 +439,14 @@ fn parse_expr<'a>(
                 return Err(ParsingError::UbalancedGrouping);
             }
             Ok(Expr::Grouping(Box::new(expr)))
+        }
+        TokenType::BANG => {
+            let expr = parse_expr(tokens_iterator)?;
+            Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
+        }
+        TokenType::MINUS => {
+            let expr = parse_expr(tokens_iterator)?;
+            Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
         }
         _ => Err(ParsingError::UnexpectedToken),
     }
