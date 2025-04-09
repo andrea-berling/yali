@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::env;
 use std::fmt::Display;
 use std::fs;
@@ -35,7 +36,7 @@ enum Unary {
     Neg(Box<Expr>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
 enum BinaryOp {
     EQUAL_EQUAL,
@@ -48,6 +49,14 @@ enum BinaryOp {
     MINUS,
     STAR,
     SLASH,
+}
+
+fn precedence_level(op: &BinaryOp) -> u8 {
+    match op {
+        BinaryOp::STAR | BinaryOp::SLASH => 1,
+        BinaryOp::MINUS | BinaryOp::PLUS => 0,
+        _ => todo!(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -429,7 +438,7 @@ fn scan_identifier_or_keyword(
 
 fn parse_expr<'a>(
     tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
-    parse_single_expr: bool,
+    previous_operators_stack: &mut VecDeque<BinaryOp>,
 ) -> Result<Expr, ParsingError> {
     let Some(Token(token_type, _lexeme, value)) = tokens_iterator.next() else {
         return Err(ParsingError::NothingToParse);
@@ -463,7 +472,7 @@ fn parse_expr<'a>(
             }
         }
         TokenType::LEFT_PAREN => {
-            let expr = parse_expr(tokens_iterator, false)?;
+            let expr = parse_expr(tokens_iterator, previous_operators_stack)?;
             if !tokens_iterator
                 .next()
                 .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::RIGHT_PAREN))
@@ -473,29 +482,44 @@ fn parse_expr<'a>(
             Ok(Expr::Grouping(Box::new(expr)))
         }
         TokenType::BANG => {
-            let expr = parse_expr(tokens_iterator, true)?;
+            let expr = parse_expr(tokens_iterator, previous_operators_stack)?;
             Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
         }
         TokenType::MINUS => {
-            let expr = parse_expr(tokens_iterator, true)?;
+            let expr = parse_expr(tokens_iterator, previous_operators_stack)?;
             Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
         }
         _ => Err(ParsingError::UnexpectedToken),
     }?;
 
-    while !parse_single_expr
-        && tokens_iterator
+    while let Some(next_binary_operator) =
+        tokens_iterator
             .peek()
-            .is_some_and(|&Token(next_token_type, _, _)| {
-                matches!(
-                    next_token_type,
-                    TokenType::STAR | TokenType::SLASH | TokenType::PLUS | TokenType::MINUS
-                )
+            .and_then(|&Token(next_token_type, _, _)| match next_token_type {
+                TokenType::MINUS => Some(BinaryOp::MINUS),
+                TokenType::PLUS => Some(BinaryOp::PLUS),
+                TokenType::STAR => Some(BinaryOp::STAR),
+                TokenType::SLASH => Some(BinaryOp::SLASH),
+                _ => None,
             })
     {
-        let binary_operator = parse_binary_operator(tokens_iterator)?;
-        let expr2 = parse_expr(tokens_iterator, true)?;
-        expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
+        if previous_operators_stack.is_empty()
+            || previous_operators_stack
+                .front()
+                .is_some_and(|previous_operator| {
+                    precedence_level(&next_binary_operator) > precedence_level(previous_operator)
+                })
+        {
+            let binary_operator = parse_binary_operator(tokens_iterator)?;
+
+            previous_operators_stack.push_front(binary_operator);
+            let expr2 = parse_expr(tokens_iterator, previous_operators_stack)?;
+
+            previous_operators_stack.pop_front();
+            expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
+        } else {
+            break;
+        }
     }
     Ok(expr)
 }
@@ -517,7 +541,7 @@ fn parse_binary_operator<'a>(
 
 fn parse_ast(tokens: &[Token]) -> Result<AST, ParsingError> {
     let mut tokens_iterator = tokens.iter().peekable();
-    let expr = parse_expr(&mut tokens_iterator, false)?;
+    let expr = parse_expr(&mut tokens_iterator, &mut VecDeque::new())?;
     if !tokens_iterator
         .next()
         .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::EOF))
