@@ -58,6 +58,7 @@ trait HasPrecedence {
 impl HasPrecedence for BinaryOp {
     fn precedence_level(&self) -> i8 {
         match self {
+            BinaryOp::LESS | BinaryOp::GREATER => 2,
             BinaryOp::STAR | BinaryOp::SLASH => 1,
             BinaryOp::MINUS | BinaryOp::PLUS => 0,
             _ => todo!(),
@@ -510,16 +511,9 @@ fn parse_expr<'a>(
         _ => Err(ParsingError::UnexpectedToken),
     }?;
 
-    while let Some(next_binary_operator) =
-        tokens_iterator
-            .peek()
-            .and_then(|&Token(next_token_type, _, _)| match next_token_type {
-                TokenType::MINUS => Some(BinaryOp::MINUS),
-                TokenType::PLUS => Some(BinaryOp::PLUS),
-                TokenType::STAR => Some(BinaryOp::STAR),
-                TokenType::SLASH => Some(BinaryOp::SLASH),
-                _ => None,
-            })
+    while let Some(Ok(next_binary_operator)) = tokens_iterator
+        .peek()
+        .map(|&t| parse_binary_operator(&mut std::iter::once(&t.clone()).peekable()))
     {
         if previous_operators_precedences_stack.is_empty()
             || previous_operators_precedences_stack
@@ -553,6 +547,8 @@ fn parse_binary_operator<'a>(
         TokenType::PLUS => Ok(BinaryOp::PLUS),
         TokenType::STAR => Ok(BinaryOp::STAR),
         TokenType::SLASH => Ok(BinaryOp::SLASH),
+        TokenType::GREATER => Ok(BinaryOp::GREATER),
+        TokenType::LESS => Ok(BinaryOp::LESS),
         _ => Err(ParsingError::InvalidExpression),
     }
 }
