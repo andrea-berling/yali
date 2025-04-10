@@ -7,57 +7,40 @@ pub const KEYWORDS: [&str; 16] = [
     "this", "true", "var", "while",
 ];
 
-macro_rules! display_as_shouty_snake {
-    ($type:ty, $( $variant:ident ),* $(,)? $(- $($variant_to_display_as_is:path,$parameter:ident),*)? ) => {
-        impl std::fmt::Display for $type {
+macro_rules! define_token_types {
+    ( $( $single_char_variant:ident, $char:literal ),* $(,)?, $(- $($other_variant:ident),*)? $(,)?, ) => {
+        #[derive(Debug, PartialEq,Clone)]
+        pub enum TokenType {
+            $( $single_char_variant ),*,
+            $($( $other_variant ),*)?
+        }
+
+        impl std::fmt::Display for TokenType {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
-                    $( <$type>::$variant => write!(f, "{}", convert_ascii_case!(shouty_snake,stringify!($variant))), )*
-                    $($($variant_to_display_as_is($parameter) => write!(f, "{}", $parameter)),*)?
+                    $( TokenType::$single_char_variant => write!(f, "{}", convert_ascii_case!(shouty_snake,stringify!($single_char_variant))), )*
+                    $($( TokenType::$other_variant => write!(f, "{}", convert_ascii_case!(shouty_snake,stringify!($other_variant))), )*)?
                 }
             }
         }
-    };
-}
 
-macro_rules! define_single_char_token_types {
-    ( $( $variant:ident, $char:literal ),* $(,)? ) => {
-        #[derive(Debug, PartialEq,Clone)]
-        pub enum SingleCharTokenType {
-            $( $variant ),*
-        }
-
-        display_as_shouty_snake!(SingleCharTokenType, $( $variant),*);
-
-        pub enum SingleTokenConversionError {
+        pub enum TokenConversionError {
             UnrecognizedCharacter,
         }
 
-        impl TryFrom<char> for SingleCharTokenType {
-            type Error = SingleTokenConversionError;
+        impl TryFrom<char> for TokenType {
+            type Error = TokenConversionError;
             fn try_from(value: char) -> Result<Self, Self::Error> {
                 match value {
-                    $( $char => Ok(SingleCharTokenType::$variant), )*
-                    _ => Err(SingleTokenConversionError::UnrecognizedCharacter),
+                    $( $char => Ok(TokenType::$single_char_variant), )*
+                    _ => Err(TokenConversionError::UnrecognizedCharacter),
                 }
             }
         }
     }
 }
 
-macro_rules! define_two_chars_token_types {
-    ( $( $variant:ident ),* $(,)? ) => {
-        #[derive(Debug, PartialEq, Clone)]
-        pub enum TwoCharsTokenType {
-            $( $variant ),*
-        }
-
-
-        display_as_shouty_snake!(TwoCharsTokenType, $( $variant),*);
-    }
-}
-
-define_single_char_token_types! {
+define_token_types! {
     LeftParen, '(',
     RightParen, ')',
     LeftBrace, '{',
@@ -73,36 +56,16 @@ define_single_char_token_types! {
     Bang,'!',
     Less, '<',
     Greater, '>',
-}
-
-define_two_chars_token_types! {
+    -
     EqualEqual,
     BangEqual,
     LessEqual,
     GreaterEqual,
-}
-
-#[derive(Debug, Clone)]
-pub enum TokenType {
-    SingleChar(SingleCharTokenType),
-    TwoChars(TwoCharsTokenType),
     String,
     Number,
     Identifier,
     Keyword,
     Eof,
-}
-
-display_as_shouty_snake! {
-    TokenType,
-    String,
-    Number,
-    Identifier,
-    Keyword,
-    Eof,
-    -
-    TokenType::SingleChar,t,
-    TokenType::TwoChars,t
 }
 
 #[derive(Clone, Debug)]
@@ -206,7 +169,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
 
         if c == '=' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token::new(
-                TokenType::TwoChars(TwoCharsTokenType::EqualEqual),
+                TokenType::EqualEqual,
                 "==".to_string(),
                 None,
                 current_line,
@@ -216,7 +179,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
 
         if c == '!' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token::new(
-                TokenType::TwoChars(TwoCharsTokenType::BangEqual),
+                TokenType::BangEqual,
                 "!=".to_string(),
                 None,
                 current_line,
@@ -226,7 +189,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
 
         if c == '<' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token::new(
-                TokenType::TwoChars(TwoCharsTokenType::LessEqual),
+                TokenType::LessEqual,
                 "<=".to_string(),
                 None,
                 current_line,
@@ -236,7 +199,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
 
         if c == '>' && input_iterator.next_if(|c| *c == '=').is_some() {
             tokens.push(Token::new(
-                TokenType::TwoChars(TwoCharsTokenType::GreaterEqual),
+                TokenType::GreaterEqual,
                 ">=".to_string(),
                 None,
                 current_line,
@@ -272,9 +235,9 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
             continue;
         }
 
-        match SingleCharTokenType::try_from(c) {
+        match TokenType::try_from(c) {
             Ok(token_type) => tokens.push(Token {
-                token_type: TokenType::SingleChar(token_type),
+                token_type,
                 lexeme: c.to_string(),
                 value: None,
                 line: current_line,

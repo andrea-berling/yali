@@ -2,7 +2,7 @@ use std::{collections::VecDeque, iter::Peekable};
 
 use thiserror::Error;
 
-use crate::lexer::{Literal, SingleCharTokenType, Token, TokenType, TwoCharsTokenType};
+use crate::lexer::{Literal, Token, TokenType};
 
 #[derive(Debug)]
 pub enum Ast {
@@ -259,45 +259,33 @@ fn parse_expr<'a>(
                 todo!()
             }
         }
-        TokenType::SingleChar(token_type) => match token_type {
-            SingleCharTokenType::LeftParen => {
-                previous_operators_precedences_stack.push_front(i8::MIN);
-                let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-                if !tokens_iterator
-                    .next()
-                    .is_some_and(|Token { token_type, .. }| {
-                        if let TokenType::SingleChar(t) = token_type {
-                            matches!(t, SingleCharTokenType::RightParen)
-                        } else {
-                            false
-                        }
-                    })
-                {
-                    return Err(ParsingError::new(
-                        line,
-                        ParsingErrorType::UnbalancedGrouping,
-                    ));
-                }
-                previous_operators_precedences_stack.pop_front();
-                Ok(Expr::Grouping(Box::new(expr)))
+        TokenType::LeftParen => {
+            previous_operators_precedences_stack.push_front(i8::MIN);
+            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            if !tokens_iterator
+                .next()
+                .is_some_and(|Token { token_type, .. }| matches!(token_type, TokenType::RightParen))
+            {
+                return Err(ParsingError::new(
+                    line,
+                    ParsingErrorType::UnbalancedGrouping,
+                ));
             }
-            SingleCharTokenType::Bang => {
-                previous_operators_precedences_stack.push_front(i8::MAX);
-                let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-                previous_operators_precedences_stack.pop_front();
-                Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
-            }
-            SingleCharTokenType::Minus => {
-                previous_operators_precedences_stack.push_front(i8::MAX);
-                let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-                previous_operators_precedences_stack.pop_front();
-                Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
-            }
-            _ => Err(ParsingError::new(
-                line,
-                ParsingErrorType::UnexpectedToken(lexeme.clone()),
-            )),
-        },
+            previous_operators_precedences_stack.pop_front();
+            Ok(Expr::Grouping(Box::new(expr)))
+        }
+        TokenType::Bang => {
+            previous_operators_precedences_stack.push_front(i8::MAX);
+            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            previous_operators_precedences_stack.pop_front();
+            Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
+        }
+        TokenType::Minus => {
+            previous_operators_precedences_stack.push_front(i8::MAX);
+            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            previous_operators_precedences_stack.pop_front();
+            Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
+        }
 
         _ => Err(ParsingError::new(
             line,
@@ -340,25 +328,16 @@ fn parse_binary_operator<'a>(
         return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
     };
     match token_type {
-        TokenType::SingleChar(token_type) => match token_type {
-            SingleCharTokenType::Minus => Ok(BinaryOp::MINUS),
-            SingleCharTokenType::Plus => Ok(BinaryOp::PLUS),
-            SingleCharTokenType::Star => Ok(BinaryOp::STAR),
-            SingleCharTokenType::Slash => Ok(BinaryOp::SLASH),
-            SingleCharTokenType::Greater => Ok(BinaryOp::GREATER),
-            SingleCharTokenType::Less => Ok(BinaryOp::LESS),
-            _ => Err(ParsingError::new(
-                *line,
-                ParsingErrorType::InvalidExpression,
-            )),
-        },
-
-        TokenType::TwoChars(token_type) => match token_type {
-            TwoCharsTokenType::GreaterEqual => Ok(BinaryOp::GREATER_EQUAL),
-            TwoCharsTokenType::LessEqual => Ok(BinaryOp::LESS_EQUAL),
-            TwoCharsTokenType::EqualEqual => Ok(BinaryOp::EQUAL_EQUAL),
-            TwoCharsTokenType::BangEqual => Ok(BinaryOp::BANG_EQUAL),
-        },
+        TokenType::Minus => Ok(BinaryOp::MINUS),
+        TokenType::Plus => Ok(BinaryOp::PLUS),
+        TokenType::Star => Ok(BinaryOp::STAR),
+        TokenType::Slash => Ok(BinaryOp::SLASH),
+        TokenType::Greater => Ok(BinaryOp::GREATER),
+        TokenType::Less => Ok(BinaryOp::LESS),
+        TokenType::GreaterEqual => Ok(BinaryOp::GREATER_EQUAL),
+        TokenType::LessEqual => Ok(BinaryOp::LESS_EQUAL),
+        TokenType::EqualEqual => Ok(BinaryOp::EQUAL_EQUAL),
+        TokenType::BangEqual => Ok(BinaryOp::BANG_EQUAL),
         _ => Err(ParsingError::new(
             *line,
             ParsingErrorType::InvalidExpression,
