@@ -105,7 +105,7 @@ display_as_shouty_snake! {
     TokenType::TwoChars,t
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
