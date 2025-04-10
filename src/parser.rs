@@ -1,8 +1,156 @@
-use std::{collections::VecDeque, iter::Peekable};
-
 use thiserror::Error;
 
 use crate::lexer::{Literal, Token, TokenType};
+
+pub struct Parser {
+    tokens: Vec<Token>,
+    position: usize,
+}
+
+macro_rules! define_binary_expression_parsers {
+    ($($expr_type:ident,$subexpr_type:ident,$operator_token_type:pat),*) => {
+        $(
+            fn $expr_type(&mut self) -> Result<Expr, ParsingError> {
+                let mut $expr_type = self.$subexpr_type()?;
+
+                while matches!(
+                    self.peek(),
+                    Some(Token {
+                        token_type: $operator_token_type,
+                        ..
+                    })
+                ) {
+                    let operator = self.advance().unwrap().clone();
+                    let $subexpr_type = self.$subexpr_type()?;
+                    $expr_type = Expr::Binary(Box::new($expr_type), operator, Box::new($subexpr_type));
+                }
+                Ok($expr_type)
+            }
+        )*
+    }
+}
+
+impl Parser {
+    pub fn new(tokens: &[Token]) -> Self {
+        Self {
+            tokens: tokens.to_vec(),
+            position: 0,
+        }
+    }
+
+    fn advance(&mut self) -> Option<&Token> {
+        if self.position < self.tokens.len() {
+            let token = &self.tokens[self.position];
+            self.position += 1;
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        if self.position < self.tokens.len() {
+            Some(&self.tokens[self.position])
+        } else {
+            None
+        }
+    }
+
+    fn primary(&mut self) -> Result<Expr, ParsingError> {
+        let Some(Token {
+            token_type,
+            value,
+            lexeme,
+            line,
+        }) = self.advance()
+        else {
+            return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
+        };
+
+        let line = *line;
+
+        match (token_type, value) {
+            (TokenType::Number, Some(l @ Literal::Number(_)))
+            | (TokenType::String, Some(l @ Literal::String(_))) => {
+                Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
+            }
+            (TokenType::Keyword, _) => {
+                if lexeme == "true" {
+                    Ok(Expr::Literal(LiteralExpr::True))
+                } else if lexeme == "false" {
+                    Ok(Expr::Literal(LiteralExpr::False))
+                } else if lexeme == "nil" {
+                    Ok(Expr::Literal(LiteralExpr::Nil))
+                } else {
+                    return Err(ParsingError::new(
+                        line,
+                        ParsingErrorType::UnexpectedToken(lexeme.to_string()),
+                    ));
+                }
+            }
+            (TokenType::LeftParen, _) => {
+                let expr = self.expr()?;
+                if !matches!(
+                    self.advance(),
+                    Some(Token {
+                        token_type: TokenType::RightParen,
+                        ..
+                    })
+                ) {
+                    return Err(ParsingError::new(
+                        line,
+                        ParsingErrorType::UnbalancedGrouping,
+                    ));
+                }
+                Ok(Expr::Grouping(Box::new(expr)))
+            }
+            _ => Err(ParsingError::new(
+                line,
+                ParsingErrorType::UnexpectedToken(lexeme.clone()),
+            )),
+        }
+    }
+
+    fn unary(&mut self) -> Result<Expr, ParsingError> {
+        match self.peek() {
+            Some(Token {
+                token_type: TokenType::Bang | TokenType::Minus,
+                ..
+            }) => {
+                let operator = self.advance().unwrap().clone();
+                Ok(Expr::Unary(operator, Box::new(self.unary()?)))
+            }
+            _ => self.primary(),
+        }
+    }
+
+    define_binary_expression_parsers! {
+        equality,comparison,TokenType::BangEqual | TokenType::EqualEqual,
+        comparison,term,TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual,
+        term,factor,TokenType::Minus | TokenType::Plus,
+        factor,unary,TokenType::Slash | TokenType::Star
+    }
+
+    fn expr(&mut self) -> Result<Expr, ParsingError> {
+        self.equality()
+    }
+
+    fn ast(&mut self) -> Result<Ast, ParsingError> {
+        let expr = self.expr()?;
+        match self.peek() {
+            Some(Token {
+                token_type, line, ..
+            }) if !matches!(token_type, TokenType::Eof) => {
+                Err(ParsingError::new(*line, ParsingErrorType::UnparsedTokens))
+            }
+            _ => Ok(Ast::Expr(expr)),
+        }
+    }
+
+    pub fn parse(&mut self) -> Result<Ast, ParsingError> {
+        self.ast()
+    }
+}
 
 #[derive(Debug)]
 pub enum Ast {
@@ -12,8 +160,8 @@ pub enum Ast {
 #[derive(Debug)]
 pub enum Expr {
     Literal(LiteralExpr),
-    Unary(Unary),
-    Binary(Box<Expr>, BinaryOp, Box<Expr>),
+    Unary(Token, Box<Expr>),
+    Binary(Box<Expr>, Token, Box<Expr>),
     Grouping(Box<Expr>),
 }
 
@@ -23,52 +171,6 @@ pub enum LiteralExpr {
     True,
     False,
     Nil,
-}
-
-#[derive(Debug)]
-pub enum Unary {
-    Minus(Box<Expr>),
-    Neg(Box<Expr>),
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_camel_case_types)]
-pub enum BinaryOp {
-    EQUAL_EQUAL,
-    BANG_EQUAL,
-    LESS,
-    LESS_EQUAL,
-    GREATER,
-    GREATER_EQUAL,
-    PLUS,
-    MINUS,
-    STAR,
-    SLASH,
-}
-
-trait HasPrecedence {
-    fn precedence_level(&self) -> i8;
-}
-
-impl HasPrecedence for BinaryOp {
-    fn precedence_level(&self) -> i8 {
-        match self {
-            BinaryOp::LESS
-            | BinaryOp::GREATER
-            | BinaryOp::LESS_EQUAL
-            | BinaryOp::GREATER_EQUAL
-            | BinaryOp::EQUAL_EQUAL
-            | BinaryOp::BANG_EQUAL => 2,
-            BinaryOp::STAR | BinaryOp::SLASH => 1,
-            BinaryOp::MINUS | BinaryOp::PLUS => 0,
-        }
-    }
-}
-
-impl HasPrecedence for Unary {
-    fn precedence_level(&self) -> i8 {
-        i8::MAX
-    }
 }
 
 #[derive(Error, Debug)]
@@ -110,10 +212,9 @@ pub trait Visit {
     fn visit_expr(&self, expr: Expr) {
         match expr {
             Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
-            Expr::Unary(unary) => self.visit_unary(unary),
-            Expr::Binary(expr, binary_op, expr1) => {
+            Expr::Unary(_, unary) => self.visit_expr(*unary),
+            Expr::Binary(expr, _, expr1) => {
                 self.visit_expr(*expr);
-                self.visit_binary_op(binary_op);
                 self.visit_expr(*expr1);
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
@@ -127,15 +228,6 @@ pub trait Visit {
     }
 
     fn visit_literal(&self, literal: Literal) {}
-
-    fn visit_unary(&self, unary: Unary) {
-        match unary {
-            Unary::Minus(expr) => self.visit_expr(*expr),
-            Unary::Neg(expr) => self.visit_expr(*expr),
-        }
-    }
-
-    fn visit_binary_op(&self, binary_op: BinaryOp) {}
 
     fn visit_grouping(&self, expr: Expr) {
         self.visit_expr(expr);
@@ -163,23 +255,6 @@ impl Visit for AstPrinter {
         print!(")")
     }
 
-    fn visit_unary(&self, unary: Unary) {
-        print!("(");
-        let expr = match unary {
-            Unary::Minus(expr) => {
-                print!("-");
-                expr
-            }
-            Unary::Neg(expr) => {
-                print!("!");
-                expr
-            }
-        };
-        print!(" ");
-        self.visit_expr(*expr);
-        print!(")");
-    }
-
     fn visit_ast(&self, ast: Ast) {
         match ast {
             Ast::Expr(expr) => self.visit_expr(expr),
@@ -190,22 +265,13 @@ impl Visit for AstPrinter {
     fn visit_expr(&self, expr: Expr) {
         match expr {
             Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
-            Expr::Unary(unary) => self.visit_unary(unary),
-            Expr::Binary(expr, binary_op, expr1) => {
-                print!("(");
-                match binary_op {
-                    BinaryOp::EQUAL_EQUAL => print!("=="),
-                    BinaryOp::BANG_EQUAL => print!("!="),
-                    BinaryOp::LESS => print!("<"),
-                    BinaryOp::LESS_EQUAL => print!("<="),
-                    BinaryOp::GREATER => print!(">"),
-                    BinaryOp::GREATER_EQUAL => print!(">="),
-                    BinaryOp::PLUS => print!("+"),
-                    BinaryOp::MINUS => print!("-"),
-                    BinaryOp::STAR => print!("*"),
-                    BinaryOp::SLASH => print!("/"),
-                }
-                print!(" ");
+            Expr::Unary(operator, expr) => {
+                print!("({} ", operator.lexeme);
+                self.visit_expr(*expr);
+                print!(")");
+            }
+            Expr::Binary(expr, operator, expr1) => {
+                print!("({} ", operator.lexeme);
                 self.visit_expr(*expr);
                 print!(" ");
                 self.visit_expr(*expr1);
@@ -213,147 +279,5 @@ impl Visit for AstPrinter {
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
         }
-    }
-}
-
-fn parse_expr<'a>(
-    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
-    previous_operators_precedences_stack: &mut VecDeque<i8>,
-) -> Result<Expr, ParsingError> {
-    let Some(Token {
-        token_type,
-        lexeme,
-        value,
-        line,
-    }) = tokens_iterator.next()
-    else {
-        return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
-    };
-
-    let line = *line;
-
-    let mut expr = match token_type {
-        TokenType::String => {
-            if let Some(l @ Literal::String(_)) = value {
-                Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
-            } else {
-                Err(ParsingError::new(line, ParsingErrorType::TokenTypeMismatch))
-            }
-        }
-        TokenType::Number => {
-            if let Some(l @ Literal::Number(_)) = value {
-                Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
-            } else {
-                Err(ParsingError::new(line, ParsingErrorType::TokenTypeMismatch))
-            }
-        }
-
-        TokenType::Keyword => {
-            if lexeme == "true" {
-                Ok(Expr::Literal(LiteralExpr::True))
-            } else if lexeme == "false" {
-                Ok(Expr::Literal(LiteralExpr::False))
-            } else if lexeme == "nil" {
-                Ok(Expr::Literal(LiteralExpr::Nil))
-            } else {
-                todo!()
-            }
-        }
-        TokenType::LeftParen => {
-            previous_operators_precedences_stack.push_front(i8::MIN);
-            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-            if !tokens_iterator
-                .next()
-                .is_some_and(|Token { token_type, .. }| matches!(token_type, TokenType::RightParen))
-            {
-                return Err(ParsingError::new(
-                    line,
-                    ParsingErrorType::UnbalancedGrouping,
-                ));
-            }
-            previous_operators_precedences_stack.pop_front();
-            Ok(Expr::Grouping(Box::new(expr)))
-        }
-        TokenType::Bang => {
-            previous_operators_precedences_stack.push_front(i8::MAX);
-            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-            previous_operators_precedences_stack.pop_front();
-            Ok(Expr::Unary(Unary::Neg(Box::new(expr))))
-        }
-        TokenType::Minus => {
-            previous_operators_precedences_stack.push_front(i8::MAX);
-            let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-            previous_operators_precedences_stack.pop_front();
-            Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
-        }
-
-        _ => Err(ParsingError::new(
-            line,
-            ParsingErrorType::UnexpectedToken(lexeme.clone()),
-        )),
-    }?;
-
-    while let Some(Ok(next_binary_operator)) = tokens_iterator
-        .peek()
-        .map(|&t| parse_binary_operator(&mut std::iter::once(&t.clone()).peekable()))
-    {
-        if previous_operators_precedences_stack.is_empty()
-            || previous_operators_precedences_stack
-                .front()
-                .is_some_and(|previous_precedence| {
-                    next_binary_operator.precedence_level() > *previous_precedence
-                })
-        {
-            let binary_operator = parse_binary_operator(tokens_iterator)?;
-
-            previous_operators_precedences_stack.push_front(binary_operator.precedence_level());
-            let expr2 = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
-
-            previous_operators_precedences_stack.pop_front();
-            expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
-        } else {
-            break;
-        }
-    }
-    Ok(expr)
-}
-
-fn parse_binary_operator<'a>(
-    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
-) -> Result<BinaryOp, ParsingError> {
-    let Some(Token {
-        token_type, line, ..
-    }) = tokens_iterator.next()
-    else {
-        return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
-    };
-    match token_type {
-        TokenType::Minus => Ok(BinaryOp::MINUS),
-        TokenType::Plus => Ok(BinaryOp::PLUS),
-        TokenType::Star => Ok(BinaryOp::STAR),
-        TokenType::Slash => Ok(BinaryOp::SLASH),
-        TokenType::Greater => Ok(BinaryOp::GREATER),
-        TokenType::Less => Ok(BinaryOp::LESS),
-        TokenType::GreaterEqual => Ok(BinaryOp::GREATER_EQUAL),
-        TokenType::LessEqual => Ok(BinaryOp::LESS_EQUAL),
-        TokenType::EqualEqual => Ok(BinaryOp::EQUAL_EQUAL),
-        TokenType::BangEqual => Ok(BinaryOp::BANG_EQUAL),
-        _ => Err(ParsingError::new(
-            *line,
-            ParsingErrorType::InvalidExpression,
-        )),
-    }
-}
-
-pub fn parse_ast(tokens: &[Token]) -> Result<Ast, ParsingError> {
-    let mut tokens_iterator = tokens.iter().peekable();
-    let expr = parse_expr(&mut tokens_iterator, &mut VecDeque::new())?;
-    match tokens_iterator.next() {
-        Some(Token {
-            token_type, line, ..
-        }) if !matches!(token_type, TokenType::Eof) => {
-            Err(ParsingError::new(*line, ParsingErrorType::UnparsedTokens))
-        }
-        _ => Ok(Ast::Expr(expr)),
     }
 }

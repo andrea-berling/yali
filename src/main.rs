@@ -5,7 +5,7 @@ mod lexer;
 mod parser;
 
 use lexer::tokenize;
-use parser::{parse_ast, AstPrinter, Visit};
+use parser::{AstPrinter, Visit};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -39,15 +39,19 @@ fn main() {
             }
         }
 
-        "parse" => match parse_ast(&tokens) {
-            Ok(ast) => {
-                AstPrinter.visit_ast(ast);
+        "parse" => {
+            let mut parser = parser::Parser::new(&tokens);
+            match parser.parse() {
+                Ok(ast) => {
+                    AstPrinter.visit_ast(ast);
+                }
+                Err(parsing_error) => {
+                    eprintln!("{parsing_error}");
+                    exit_code = 65;
+                }
             }
-            Err(parsing_error) => {
-                eprintln!("{parsing_error}");
-                exit_code = 65;
-            }
-        },
+        }
+
         _ => {
             eprintln!("Unknown command: {}", command);
         }
