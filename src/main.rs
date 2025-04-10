@@ -43,7 +43,8 @@ fn main() {
             Ok(ast) => {
                 AstPrinter.visit_ast(ast);
             }
-            Err(e) => {
+            Err(parsing_error) => {
+                eprintln!("{parsing_error}");
                 exit_code = 65;
             }
         },

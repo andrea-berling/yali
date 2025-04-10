@@ -1,5 +1,7 @@
 use std::{collections::VecDeque, iter::Peekable};
 
+use thiserror::Error;
+
 use crate::lexer::{Literal, SingleCharTokenType, Token, TokenType, TwoCharsTokenType};
 
 #[derive(Debug)]
@@ -8,7 +10,7 @@ pub enum Ast {
 }
 
 #[derive(Debug)]
-enum Expr {
+pub enum Expr {
     Literal(LiteralExpr),
     Unary(Unary),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
@@ -69,18 +71,24 @@ impl HasPrecedence for Unary {
     }
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ParsingErrorType {
+    #[error("Unparsed tokens")]
     UnparsedTokens,
+    #[error("Nothing to parse")]
     NothingToParse,
+    #[error("Token type mismatch")]
     TokenTypeMismatch,
+    #[error("Error at '{0}': Expect expression")]
     UnexpectedToken(String),
+    #[error("Unbalanced grouping")]
     UnbalancedGrouping,
-    MalformedBinaryOperation,
+    #[error("Invalid expression")]
     InvalidExpression,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
+#[error("[line {line}] {error}.")]
 pub struct ParsingError {
     line: usize,
     error: ParsingErrorType,
@@ -311,20 +319,7 @@ fn parse_expr<'a>(
             let binary_operator = parse_binary_operator(tokens_iterator)?;
 
             previous_operators_precedences_stack.push_front(binary_operator.precedence_level());
-            let expr2 = parse_expr(tokens_iterator, previous_operators_precedences_stack).or_else(
-                |ParsingError { error: err, .. }| match err {
-                    ParsingErrorType::UnparsedTokens => todo!(),
-                    ParsingErrorType::NothingToParse => todo!(),
-                    ParsingErrorType::TokenTypeMismatch => todo!(),
-                    ParsingErrorType::UnexpectedToken(ref lexeme) => {
-                        eprintln!("[line {line}] Error at '{lexeme}': Expect expression.");
-                        Err(ParsingError::new(line, err))
-                    }
-                    ParsingErrorType::UnbalancedGrouping => todo!(),
-                    ParsingErrorType::MalformedBinaryOperation => todo!(),
-                    ParsingErrorType::InvalidExpression => todo!(),
-                },
-            )?;
+            let expr2 = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
 
             previous_operators_precedences_stack.pop_front();
             expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
