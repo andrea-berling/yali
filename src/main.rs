@@ -163,7 +163,7 @@ enum ParsingError {
     UnparsedTokens,
     NothingToParse,
     TokenTypeMismatch,
-    UnexpectedToken,
+    UnexpectedToken(String),
     UnbalancedGrouping,
     MalformedBinaryOperation,
     InvalidExpression,
@@ -204,10 +204,10 @@ impl TryFrom<char> for Token {
     }
 }
 
-fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
+fn tokenize(input: &str) -> (Vec<(usize, Token)>, Vec<(usize, ScanningError)>) {
     let mut tokens = vec![];
     let mut errors = vec![];
-    let mut current_line = 1;
+    let mut current_line = 1usize;
     let mut input_iterator = input.chars().peekable();
     while let Some(c) = input_iterator.next() {
         if c.is_whitespace() {
@@ -223,28 +223,40 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
         }
 
         if c == '=' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push(Token(TokenType::EQUAL_EQUAL, "==".to_string(), None));
+            tokens.push((
+                current_line,
+                Token(TokenType::EQUAL_EQUAL, "==".to_string(), None),
+            ));
             continue;
         }
 
         if c == '!' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push(Token(TokenType::BANG_EQUAL, "!=".to_string(), None));
+            tokens.push((
+                current_line,
+                Token(TokenType::BANG_EQUAL, "!=".to_string(), None),
+            ));
             continue;
         }
 
         if c == '<' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push(Token(TokenType::LESS_EQUAL, "<=".to_string(), None));
+            tokens.push((
+                current_line,
+                Token(TokenType::LESS_EQUAL, "<=".to_string(), None),
+            ));
             continue;
         }
 
         if c == '>' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push(Token(TokenType::GREATER_EQUAL, ">=".to_string(), None));
+            tokens.push((
+                current_line,
+                Token(TokenType::GREATER_EQUAL, ">=".to_string(), None),
+            ));
             continue;
         }
 
         if c == '"' {
             match scan_string_literal(&mut input_iterator) {
-                Ok(t) => tokens.push(t),
+                Ok(t) => tokens.push((current_line, t)),
                 Err(e) => errors.push((current_line, e)),
             }
             continue;
@@ -252,7 +264,7 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
 
         if c.is_ascii_digit() {
             match scan_number_literal(&mut input_iterator, c) {
-                Ok(t) => tokens.push(t),
+                Ok(t) => tokens.push((current_line, t)),
                 Err(e) => errors.push((current_line, e)),
             }
             continue;
@@ -260,14 +272,14 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, ScanningError)>) {
 
         if c.is_ascii_alphabetic() || c == '_' {
             match scan_identifier_or_keyword(&mut input_iterator, c) {
-                Ok(t) => tokens.push(t),
+                Ok(t) => tokens.push((current_line, t)),
                 Err(e) => errors.push((current_line, e)),
             }
             continue;
         }
 
         match Token::try_from(c) {
-            Ok(token) => tokens.push(token),
+            Ok(t) => tokens.push((current_line, t)),
             Err(err) => {
                 errors.push((current_line, err));
             }
@@ -454,26 +466,28 @@ fn scan_identifier_or_keyword(
 }
 
 fn parse_expr<'a>(
-    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
+    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a (usize, Token)>>,
     previous_operators_precedences_stack: &mut VecDeque<i8>,
-) -> Result<Expr, ParsingError> {
-    let Some(Token(token_type, _lexeme, value)) = tokens_iterator.next() else {
-        return Err(ParsingError::NothingToParse);
+) -> Result<Expr, (usize, ParsingError)> {
+    let Some((current_line, Token(token_type, lexeme, value))) = tokens_iterator.next() else {
+        return Err((0, ParsingError::NothingToParse));
     };
+
+    let current_line = *current_line;
 
     let mut expr = match token_type {
         TokenType::STRING => {
             if let Some(l @ Literal::String(_)) = value {
                 Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
             } else {
-                Err(ParsingError::TokenTypeMismatch)
+                Err((current_line, ParsingError::TokenTypeMismatch))
             }
         }
         TokenType::NUMBER => {
             if let Some(l @ Literal::Number(_)) = value {
                 Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
             } else {
-                Err(ParsingError::TokenTypeMismatch)
+                Err((current_line, ParsingError::TokenTypeMismatch))
             }
         }
 
@@ -493,9 +507,11 @@ fn parse_expr<'a>(
             let expr = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
             if !tokens_iterator
                 .next()
-                .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::RIGHT_PAREN))
+                .is_some_and(|(current_line, Token(token_type, _, _))| {
+                    matches!(token_type, TokenType::RIGHT_PAREN)
+                })
             {
-                return Err(ParsingError::UnbalancedGrouping);
+                return Err((current_line, ParsingError::UnbalancedGrouping));
             }
             previous_operators_precedences_stack.pop_front();
             Ok(Expr::Grouping(Box::new(expr)))
@@ -512,7 +528,7 @@ fn parse_expr<'a>(
             previous_operators_precedences_stack.pop_front();
             Ok(Expr::Unary(Unary::Minus(Box::new(expr))))
         }
-        _ => Err(ParsingError::UnexpectedToken),
+        _ => Err((current_line, ParsingError::UnexpectedToken(lexeme.clone()))),
     }?;
 
     while let Some(Ok(next_binary_operator)) = tokens_iterator
@@ -529,7 +545,20 @@ fn parse_expr<'a>(
             let binary_operator = parse_binary_operator(tokens_iterator)?;
 
             previous_operators_precedences_stack.push_front(binary_operator.precedence_level());
-            let expr2 = parse_expr(tokens_iterator, previous_operators_precedences_stack)?;
+            let expr2 = parse_expr(tokens_iterator, previous_operators_precedences_stack).or_else(
+                |(line, err)| match err {
+                    ParsingError::UnparsedTokens => todo!(),
+                    ParsingError::NothingToParse => todo!(),
+                    ParsingError::TokenTypeMismatch => todo!(),
+                    ParsingError::UnexpectedToken(ref lexeme) => {
+                        eprintln!("[line {line}] Error at '{lexeme}': Expect expression.");
+                        Err((line, err))
+                    }
+                    ParsingError::UnbalancedGrouping => todo!(),
+                    ParsingError::MalformedBinaryOperation => todo!(),
+                    ParsingError::InvalidExpression => todo!(),
+                },
+            )?;
 
             previous_operators_precedences_stack.pop_front();
             expr = Expr::Binary(Box::new(expr), binary_operator, Box::new(expr2));
@@ -541,10 +570,10 @@ fn parse_expr<'a>(
 }
 
 fn parse_binary_operator<'a>(
-    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a Token>>,
-) -> Result<BinaryOp, ParsingError> {
-    let Some(Token(token_type, _, _)) = tokens_iterator.next() else {
-        return Err(ParsingError::NothingToParse);
+    tokens_iterator: &mut Peekable<impl Iterator<Item = &'a (usize, Token)>>,
+) -> Result<BinaryOp, (usize, ParsingError)> {
+    let Some((current_line, Token(token_type, _, _))) = tokens_iterator.next() else {
+        return Err((0, ParsingError::NothingToParse));
     };
     match token_type {
         TokenType::MINUS => Ok(BinaryOp::MINUS),
@@ -557,16 +586,16 @@ fn parse_binary_operator<'a>(
         TokenType::LESS_EQUAL => Ok(BinaryOp::LESS_EQUAL),
         TokenType::EQUAL_EQUAL => Ok(BinaryOp::EQUAL_EQUAL),
         TokenType::BANG_EQUAL => Ok(BinaryOp::BANG_EQUAL),
-        _ => Err(ParsingError::InvalidExpression),
+        _ => Err((*current_line, ParsingError::InvalidExpression)),
     }
 }
 
-fn parse_ast(tokens: &[Token]) -> Result<AST, ParsingError> {
+fn parse_ast(tokens: &[(usize, Token)]) -> Result<AST, ParsingError> {
     let mut tokens_iterator = tokens.iter().peekable();
-    let expr = parse_expr(&mut tokens_iterator, &mut VecDeque::new())?;
+    let expr = parse_expr(&mut tokens_iterator, &mut VecDeque::new()).map_err(|(_, e)| e)?;
     if !tokens_iterator
         .next()
-        .is_some_and(|Token(token_type, _, _)| matches!(token_type, TokenType::EOF))
+        .is_some_and(|(_, Token(token_type, _, _))| matches!(token_type, TokenType::EOF))
     {
         return Err(ParsingError::UnparsedTokens);
     }
@@ -593,14 +622,14 @@ fn main() {
 
             // Uncomment this block to pass the first stage
             let (mut tokens, scanning_errors) = tokenize(&file_contents);
-            tokens.push(EOF_TOKEN.clone());
+            tokens.push((0, EOF_TOKEN.clone()));
             if !scanning_errors.is_empty() {
                 exit_code = 65;
                 for (line, err) in scanning_errors {
                     eprintln!("[line {}] Error: {}", line, err);
                 }
             }
-            for token in tokens {
+            for (_, token) in tokens {
                 println!("{}", token);
             }
         }
@@ -611,12 +640,14 @@ fn main() {
                 String::new()
             });
             let (mut tokens, _scanning_errors) = tokenize(&file_contents);
-            tokens.push(EOF_TOKEN.clone());
+            tokens.push((0, EOF_TOKEN.clone()));
             match parse_ast(&tokens) {
                 Ok(ast) => {
                     AstPrinter.visit_ast(ast);
                 }
-                Err(err) => println!("{err:?}"),
+                Err(err) => {
+                    exit_code = 65;
+                }
             }
         }
         _ => {
