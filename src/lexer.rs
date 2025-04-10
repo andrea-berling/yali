@@ -1,43 +1,133 @@
+use const_str::convert_ascii_case;
 use std::fmt::Display;
+use thiserror::Error;
 
 pub const KEYWORDS: [&str; 16] = [
     "and", "class", "else", "false", "for", "fun", "if", "nil", "or", "print", "return", "super",
     "this", "true", "var", "while",
 ];
 
+macro_rules! display_as_shouty_snake {
+    ($type:ty, $( $variant:ident ),* $(,)? $(- $($variant_to_display_as_is:path,$parameter:ident),*)? ) => {
+        impl std::fmt::Display for $type {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $( <$type>::$variant => write!(f, "{}", convert_ascii_case!(shouty_snake,stringify!($variant))), )*
+                    $($($variant_to_display_as_is($parameter) => write!(f, "{}", $parameter)),*)?
+                }
+            }
+        }
+    };
+}
+
+macro_rules! define_single_char_token_types {
+    ( $( $variant:ident, $char:literal ),* $(,)? ) => {
+        #[derive(Debug, PartialEq,Clone)]
+        pub enum SingleCharTokenType {
+            $( $variant ),*
+        }
+
+        display_as_shouty_snake!(SingleCharTokenType, $( $variant),*);
+
+        pub enum SingleTokenConversionError {
+            UnrecognizedCharacter,
+        }
+
+        impl TryFrom<char> for SingleCharTokenType {
+            type Error = SingleTokenConversionError;
+            fn try_from(value: char) -> Result<Self, Self::Error> {
+                match value {
+                    $( $char => Ok(SingleCharTokenType::$variant), )*
+                    _ => Err(SingleTokenConversionError::UnrecognizedCharacter),
+                }
+            }
+        }
+    }
+}
+
+macro_rules! define_two_chars_token_types {
+    ( $( $variant:ident ),* $(,)? ) => {
+        #[derive(Debug, PartialEq, Clone)]
+        pub enum TwoCharsTokenType {
+            $( $variant ),*
+        }
+
+
+        display_as_shouty_snake!(TwoCharsTokenType, $( $variant),*);
+    }
+}
+
+define_single_char_token_types! {
+    LeftParen, '(',
+    RightParen, ')',
+    LeftBrace, '{',
+    RightBrace, '}',
+    Comma, ',',
+    Dot, '.',
+    Minus, '-',
+    Plus, '+',
+    Semicolon, ';',
+    Slash, '/',
+    Star, '*',
+    Equal, '=',
+    Bang,'!',
+    Less, '<',
+    Greater, '>',
+}
+
+define_two_chars_token_types! {
+    EqualEqual,
+    BangEqual,
+    LessEqual,
+    GreaterEqual,
+}
+
 #[derive(Debug, Clone)]
-#[allow(non_camel_case_types)]
 pub enum TokenType {
-    LEFT_PAREN,
-    RIGHT_PAREN,
-    LEFT_BRACE,
-    RIGHT_BRACE,
-    COMMA,
-    DOT,
-    MINUS,
-    PLUS,
-    SEMICOLON,
-    SLASH,
-    STAR,
-    EQUAL,
-    EQUAL_EQUAL,
-    BANG,
-    BANG_EQUAL,
-    LESS,
-    LESS_EQUAL,
-    GREATER,
-    GREATER_EQUAL,
-    STRING,
-    NUMBER,
-    IDENTIFIER,
-    EOF,
-    KEYWORD(String),
+    SingleChar(SingleCharTokenType),
+    TwoChars(TwoCharsTokenType),
+    String,
+    Number,
+    Identifier,
+    Keyword,
+    Eof,
+}
+
+display_as_shouty_snake! {
+    TokenType,
+    String,
+    Number,
+    Identifier,
+    Keyword,
+    Eof,
+    -
+    TokenType::SingleChar,t,
+    TokenType::TwoChars,t
 }
 
 #[derive(Clone)]
-pub struct Token(pub TokenType, pub String, pub Option<Literal>);
+pub struct Token {
+    pub token_type: TokenType,
+    pub lexeme: String,
+    pub value: Option<Literal>,
+    pub line: usize,
+}
 
-pub const EOF_TOKEN: Token = Token(TokenType::EOF, String::new(), None);
+impl Token {
+    pub const fn new(
+        token_type: TokenType,
+        lexeme: String,
+        value: Option<Literal>,
+        line: usize,
+    ) -> Self {
+        Token {
+            token_type,
+            lexeme,
+            value,
+            line,
+        }
+    }
+}
 
 #[non_exhaustive]
 #[derive(Clone, Debug)]
@@ -66,13 +156,13 @@ impl Display for Token {
         write!(
             f,
             "{} {} {}",
-            if let TokenType::KEYWORD(keyword) = &self.0 {
-                keyword.to_uppercase()
+            if let TokenType::Keyword = &self.token_type {
+                self.lexeme.to_uppercase()
             } else {
-                format!("{:?}", self.0)
+                self.token_type.to_string()
             },
-            self.1,
-            match self.2 {
+            self.lexeme,
+            match self.value {
                 Some(ref l) => format!("{l}"),
                 None => "null".to_string(),
             }
@@ -81,48 +171,22 @@ impl Display for Token {
 }
 
 #[derive(Debug)]
-pub enum ScanningError {
+pub struct ScanningError {
+    pub line: usize,
+    pub error: ScanningErrorType,
+}
+
+#[derive(Error, Debug)]
+pub enum ScanningErrorType {
+    #[error("Unexpected character: {0}")]
     UnexpectedCharacter(char),
+    #[error("Unterminated string.")]
     UnterminatedString,
+    #[error("Invalid number literal.")]
     InvalidNumberLiteral,
 }
 
-impl Display for ScanningError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScanningError::UnexpectedCharacter(c) => write!(f, "Unexpected character: {}", c),
-            ScanningError::UnterminatedString => write!(f, "Unterminated string."),
-            ScanningError::InvalidNumberLiteral => write!(f, "Invalid number literal."),
-        }
-    }
-}
-
-impl TryFrom<char> for Token {
-    type Error = ScanningError;
-
-    fn try_from(value: char) -> Result<Self, Self::Error> {
-        match value {
-            '(' => Ok(Token(TokenType::LEFT_PAREN, value.to_string(), None)),
-            ')' => Ok(Token(TokenType::RIGHT_PAREN, value.to_string(), None)),
-            '{' => Ok(Token(TokenType::LEFT_BRACE, value.to_string(), None)),
-            '}' => Ok(Token(TokenType::RIGHT_BRACE, value.to_string(), None)),
-            ',' => Ok(Token(TokenType::COMMA, value.to_string(), None)),
-            '.' => Ok(Token(TokenType::DOT, value.to_string(), None)),
-            '-' => Ok(Token(TokenType::MINUS, value.to_string(), None)),
-            '+' => Ok(Token(TokenType::PLUS, value.to_string(), None)),
-            ';' => Ok(Token(TokenType::SEMICOLON, value.to_string(), None)),
-            '/' => Ok(Token(TokenType::SLASH, value.to_string(), None)),
-            '*' => Ok(Token(TokenType::STAR, value.to_string(), None)),
-            '=' => Ok(Token(TokenType::EQUAL, value.to_string(), None)),
-            '!' => Ok(Token(TokenType::BANG, value.to_string(), None)),
-            '<' => Ok(Token(TokenType::LESS, value.to_string(), None)),
-            '>' => Ok(Token(TokenType::GREATER, value.to_string(), None)),
-            _ => Err(ScanningError::UnexpectedCharacter(value)),
-        }
-    }
-}
-
-pub fn tokenize(input: &str) -> (Vec<(usize, Token)>, Vec<(usize, ScanningError)>) {
+pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
     let mut tokens = vec![];
     let mut errors = vec![];
     let mut current_line = 1usize;
@@ -141,128 +205,174 @@ pub fn tokenize(input: &str) -> (Vec<(usize, Token)>, Vec<(usize, ScanningError)
         }
 
         if c == '=' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push((
+            tokens.push(Token::new(
+                TokenType::TwoChars(TwoCharsTokenType::EqualEqual),
+                "==".to_string(),
+                None,
                 current_line,
-                Token(TokenType::EQUAL_EQUAL, "==".to_string(), None),
             ));
             continue;
         }
 
         if c == '!' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push((
+            tokens.push(Token::new(
+                TokenType::TwoChars(TwoCharsTokenType::BangEqual),
+                "!=".to_string(),
+                None,
                 current_line,
-                Token(TokenType::BANG_EQUAL, "!=".to_string(), None),
             ));
             continue;
         }
 
         if c == '<' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push((
+            tokens.push(Token::new(
+                TokenType::TwoChars(TwoCharsTokenType::LessEqual),
+                "<=".to_string(),
+                None,
                 current_line,
-                Token(TokenType::LESS_EQUAL, "<=".to_string(), None),
             ));
             continue;
         }
 
         if c == '>' && input_iterator.next_if(|c| *c == '=').is_some() {
-            tokens.push((
+            tokens.push(Token::new(
+                TokenType::TwoChars(TwoCharsTokenType::GreaterEqual),
+                ">=".to_string(),
+                None,
                 current_line,
-                Token(TokenType::GREATER_EQUAL, ">=".to_string(), None),
             ));
             continue;
         }
 
+        let mut next_scanner: Option<
+            fn(
+                &mut std::iter::Peekable<std::str::Chars<'_>>,
+                first_char: char,
+                current_line: usize,
+            ) -> Result<Token, ScanningError>,
+        > = None;
+
         if c == '"' {
-            match scan_string_literal(&mut input_iterator) {
-                Ok(t) => tokens.push((current_line, t)),
-                Err(e) => errors.push((current_line, e)),
-            }
-            continue;
+            next_scanner = Some(scan_string_literal);
         }
 
         if c.is_ascii_digit() {
-            match scan_number_literal(&mut input_iterator, c) {
-                Ok(t) => tokens.push((current_line, t)),
-                Err(e) => errors.push((current_line, e)),
-            }
-            continue;
+            next_scanner = Some(scan_number_literal);
         }
 
         if c.is_ascii_alphabetic() || c == '_' {
-            match scan_identifier_or_keyword(&mut input_iterator, c) {
-                Ok(t) => tokens.push((current_line, t)),
-                Err(e) => errors.push((current_line, e)),
+            next_scanner = Some(scan_identifier_or_keyword);
+        }
+
+        if let Some(scanner) = next_scanner {
+            match scanner(&mut input_iterator, c, current_line) {
+                Ok(t) => tokens.push(t),
+                Err(e) => errors.push(e),
             }
             continue;
         }
 
-        match Token::try_from(c) {
-            Ok(t) => tokens.push((current_line, t)),
-            Err(err) => {
-                errors.push((current_line, err));
+        match SingleCharTokenType::try_from(c) {
+            Ok(token_type) => tokens.push(Token {
+                token_type: TokenType::SingleChar(token_type),
+                lexeme: c.to_string(),
+                value: None,
+                line: current_line,
+            }),
+            Err(_) => {
+                errors.push(ScanningError {
+                    line: current_line,
+                    error: ScanningErrorType::UnexpectedCharacter(c),
+                });
             }
         }
     }
+    tokens.push(Token::new(
+        TokenType::Eof,
+        String::new(),
+        None,
+        current_line,
+    ));
     (tokens, errors)
 }
 
 fn scan_string_literal(
     input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    first_char: char,
+    current_line: usize,
 ) -> Result<Token, ScanningError> {
-    let mut string_literal = String::new();
+    let mut quoted_string_literal = first_char.to_string();
     let mut terminated = false;
     while let Some(c) = input_iterator.next() {
+        quoted_string_literal.push(c);
         if c == '"' {
             terminated = true;
             break;
         }
-        string_literal.push(c);
     }
     if input_iterator.peek().is_none() && !terminated {
-        Err(ScanningError::UnterminatedString)
+        Err(ScanningError {
+            line: current_line,
+            error: ScanningErrorType::UnterminatedString,
+        })
     } else {
-        Ok(Token(
-            TokenType::STRING,
-            format!("\"{string_literal}\""),
-            Some(Literal::String(string_literal)),
+        Ok(Token::new(
+            TokenType::String,
+            quoted_string_literal.to_string(),
+            Some(Literal::String(
+                quoted_string_literal[1..quoted_string_literal.len() - 1].to_string(),
+            )),
+            current_line,
         ))
     }
 }
 
 fn scan_number_literal(
     input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
-    first_digit: char,
+    first_char: char,
+    current_line: usize,
 ) -> Result<Token, ScanningError> {
-    let mut number_literal = first_digit.to_string();
+    let mut number_literal = first_char.to_string();
     while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_digit() || c == '.') {
         number_literal.push(c);
     }
     if let Ok(n) = number_literal.parse::<f64>() {
-        Ok(Token(
-            TokenType::NUMBER,
+        Ok(Token::new(
+            TokenType::Number,
             number_literal,
             Some(Literal::Number(n)),
+            current_line,
         ))
     } else {
-        Err(ScanningError::InvalidNumberLiteral)
+        Err(ScanningError {
+            line: current_line,
+            error: ScanningErrorType::InvalidNumberLiteral,
+        })
     }
 }
 
 fn scan_identifier_or_keyword(
     input_iterator: &mut std::iter::Peekable<std::str::Chars<'_>>,
     first_char: char,
+    current_line: usize,
 ) -> Result<Token, ScanningError> {
     let mut identifier = first_char.to_string();
     while let Some(c) = input_iterator.next_if(|&c| c.is_ascii_alphanumeric() || c == '_') {
         identifier.push(c);
     }
     if KEYWORDS.contains(&identifier.as_str()) {
-        Ok(Token(
-            TokenType::KEYWORD(identifier.clone()),
+        Ok(Token::new(
+            TokenType::Keyword,
             identifier,
             None,
+            current_line,
         ))
     } else {
-        Ok(Token(TokenType::IDENTIFIER, identifier, None))
+        Ok(Token::new(
+            TokenType::Identifier,
+            identifier,
+            None,
+            current_line,
+        ))
     }
 }

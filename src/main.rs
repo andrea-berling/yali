@@ -2,10 +2,10 @@ use std::env;
 use std::fs;
 
 mod lexer;
-mod parser;
+//mod parser;
 
-use lexer::{tokenize, EOF_TOKEN};
-use parser::{parse_ast, AstPrinter, Visit};
+use lexer::tokenize;
+//use parser::{parse_ast, AstPrinter, Visit};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -24,30 +24,29 @@ fn main() {
     });
 
     // Uncomment this block to pass the first stage
-    let (mut tokens, scanning_errors) = tokenize(&file_contents);
-    tokens.push((0, EOF_TOKEN.clone()));
+    let (tokens, scanning_errors) = tokenize(&file_contents);
 
     match command.as_str() {
         "tokenize" => {
             if !scanning_errors.is_empty() {
                 exit_code = 65;
-                for (line, err) in scanning_errors {
-                    eprintln!("[line {}] Error: {}", line, err);
+                for err in scanning_errors {
+                    eprintln!("[line {}] Error: {}", err.line, err.error);
                 }
             }
-            for (_, token) in tokens {
+            for token in tokens {
                 println!("{}", token);
             }
         }
 
-        "parse" => match parse_ast(&tokens) {
+        "parse" => todo!() /*match parse_ast(&tokens) {
             Ok(ast) => {
                 AstPrinter.visit_ast(ast);
             }
             Err(_) => {
                 exit_code = 65;
             }
-        },
+        }*/,
         _ => {
             eprintln!("Unknown command: {}", command);
         }
