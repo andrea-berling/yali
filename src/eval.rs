@@ -108,7 +108,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Bool(l == r)),
                     (EvalResult::String(l), EvalResult::String(r)) => Ok(EvalResult::Bool(l == r)),
                     (EvalResult::Bool(l), EvalResult::Bool(r)) => Ok(EvalResult::Bool(l == r)),
-                    _ => Err(EvalError::IvalidOperator),
+                    _ => Ok(EvalResult::Bool(false)),
                 }
             }
             TokenType::BangEqual => {
@@ -118,7 +118,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Bool(l != r)),
                     (EvalResult::String(l), EvalResult::String(r)) => Ok(EvalResult::Bool(l != r)),
                     (EvalResult::Bool(l), EvalResult::Bool(r)) => Ok(EvalResult::Bool(l != r)),
-                    _ => Err(EvalError::IvalidOperator),
+                    _ => Ok(EvalResult::Bool(true)),
                 }
             }
             TokenType::Greater => {
