@@ -51,8 +51,8 @@ fn main() {
                     "evaluate" => match eval_ast(&ast) {
                         Ok(val) => println!("{val}"),
                         Err(err) => {
-                            exit_code = 65;
-                            eprintln!("{err}")
+                            exit_code = 70;
+                            eprintln!("{}\n[line {}]", err.error, err.line);
                         }
                     },
                     _ => panic!("Impossible"),

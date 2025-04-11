@@ -13,13 +13,27 @@ pub enum EvalResult {
 }
 
 #[derive(Debug, Error)]
-pub enum EvalError {
+pub enum EvalErrorType {
     #[error("Invalid operand")]
     IvalidOperand,
     #[error("Invalid operator")]
     IvalidOperator,
     #[error("Unexpected token")]
     UnexpectedToken,
+    #[error("Operand must be a number.")]
+    OperandMustBeANumber,
+}
+
+#[derive(Debug)]
+pub struct EvalError {
+    pub line: usize,
+    pub error: EvalErrorType,
+}
+
+impl EvalError {
+    pub fn new(line: usize, error: EvalErrorType) -> Self {
+        Self { line, error }
+    }
 }
 
 impl Display for EvalResult {
@@ -49,14 +63,17 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let EvalResult::Number(n) = eval_expr(expr)? {
                     Ok(EvalResult::Number(-n))
                 } else {
-                    Err(EvalError::IvalidOperand)
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandMustBeANumber,
+                    ))
                 }
             }
             TokenType::Bang => match eval_expr(expr)? {
                 EvalResult::Bool(false) | EvalResult::Nil => Ok(EvalResult::Bool(true)),
                 _ => Ok(EvalResult::Bool(false)),
             },
-            _ => Err(EvalError::IvalidOperator),
+            _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
         },
         Expr::Binary(expr, token, expr1) => match &token.token_type {
             TokenType::Plus => {
@@ -67,7 +84,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     (EvalResult::String(l), EvalResult::String(r)) => {
                         Ok(EvalResult::String(format!("{}{}", l, r)))
                     }
-                    _ => Err(EvalError::IvalidOperator),
+                    _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
                 }
             }
             TokenType::Minus => {
@@ -76,7 +93,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l - r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
 
@@ -86,7 +103,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l * r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
             TokenType::Slash => {
@@ -94,11 +111,11 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 let right = eval_expr(expr1)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     if r == 0.0 {
-                        return Err(EvalError::IvalidOperator);
+                        return Err(EvalError::new(token.line, EvalErrorType::IvalidOperator));
                     }
                     Ok(EvalResult::Number(l / r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
             TokenType::EqualEqual => {
@@ -127,7 +144,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l > r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
             TokenType::GreaterEqual => {
@@ -136,7 +153,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l >= r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
             TokenType::Less => {
@@ -145,7 +162,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l < r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
             TokenType::LessEqual => {
@@ -154,10 +171,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l <= r))
                 } else {
-                    Err(EvalError::IvalidOperator)
+                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
                 }
             }
-            _ => Err(EvalError::IvalidOperator),
+            _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
         },
         Expr::Grouping(expr) => eval_expr(expr),
     }
