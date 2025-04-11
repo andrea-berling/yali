@@ -22,6 +22,8 @@ pub enum EvalErrorType {
     UnexpectedToken,
     #[error("Operand must be a number.")]
     OperandMustBeANumber,
+    #[error("Operands must be numbers.")]
+    OperandsMustBeNumbers,
 }
 
 #[derive(Debug)]
@@ -103,7 +105,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l * r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeNumbers,
+                    ))
                 }
             }
             TokenType::Slash => {
@@ -115,7 +120,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     }
                     Ok(EvalResult::Number(l / r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeNumbers,
+                    ))
                 }
             }
             TokenType::EqualEqual => {
