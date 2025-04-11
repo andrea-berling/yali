@@ -52,13 +52,11 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     Err(EvalError::IvalidOperand)
                 }
             }
-            TokenType::Bang => {
-                if let EvalResult::Bool(b) = eval_expr(expr)? {
-                    Ok(EvalResult::Bool(!b))
-                } else {
-                    Err(EvalError::IvalidOperand)
-                }
-            }
+            TokenType::Bang => match eval_expr(expr)? {
+                EvalResult::Bool(b) => Ok(EvalResult::Bool(!b)),
+                EvalResult::Nil => Ok(EvalResult::Bool(true)),
+                _ => Err(EvalError::IvalidOperand),
+            },
             _ => Err(EvalError::IvalidOperator),
         },
         Expr::Binary(expr, token, expr1) => match &token.token_type {
