@@ -4,10 +4,12 @@ use std::fs;
 mod eval;
 mod lexer;
 mod parser;
+mod run;
 
 use eval::eval_ast;
 use lexer::tokenize;
 use parser::{AstPrinter, Visit};
+use run::run_program;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -41,26 +43,39 @@ fn main() {
             }
         }
 
-        cmd @ ("parse" | "evaluate") => {
+        cmd @ ("parse" | "evaluate" | "run") => {
             let mut parser = parser::Parser::new(&tokens);
-            match parser.parse() {
-                Ok(ast) => match cmd {
-                    "parse" => {
-                        AstPrinter.visit_ast(ast);
+            match cmd {
+                "parse" => match parser.parse_ast() {
+                    Ok(ast) => AstPrinter.visit_ast(ast),
+                    Err(parsing_error) => {
+                        eprintln!("{parsing_error}");
+                        exit_code = 65;
                     }
-                    "evaluate" => match eval_ast(&ast) {
+                },
+                "evaluate" => match parser.parse_ast() {
+                    Ok(ast) => match eval_ast(&ast) {
                         Ok(val) => println!("{val}"),
                         Err(err) => {
                             exit_code = 70;
                             eprintln!("{}\n[line {}]", err.error, err.line);
                         }
                     },
-                    _ => panic!("Impossible"),
+                    Err(parsing_error) => {
+                        eprintln!("{parsing_error}");
+                        exit_code = 65;
+                    }
                 },
-                Err(parsing_error) => {
-                    eprintln!("{parsing_error}");
-                    exit_code = 65;
-                }
+                "run" => match parser.parse_program() {
+                    Ok(program) => {
+                        run_program(&program);
+                    }
+                    Err(parsing_error) => {
+                        eprintln!("{parsing_error}");
+                        exit_code = 65;
+                    }
+                },
+                _ => panic!("Impossible"),
             }
         }
 

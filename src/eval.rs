@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use thiserror::Error;
 
 use crate::lexer::TokenType;
-use crate::parser::{Ast, Expr};
+use crate::parser::{Ast, Expr, Program, Statement};
 
 pub enum EvalResult {
     Number(f64),

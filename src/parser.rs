@@ -147,7 +147,60 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Ast, ParsingError> {
+    pub fn statement(&mut self) -> Result<Statement, ParsingError> {
+        let Some(first_token) = self.peek().cloned() else {
+            return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
+        };
+        let return_value = match first_token {
+            Token {
+                token_type: TokenType::Keyword,
+                lexeme,
+                ..
+            } if lexeme == "print" => {
+                self.advance();
+                let expr = self.expr()?;
+                Ok(Statement::Print(expr))
+            }
+            _ => {
+                let expr = self.expr()?;
+                Ok(Statement::Expr(expr))
+            }
+        };
+
+        if !matches!(
+            self.advance(),
+            Some(Token {
+                token_type: TokenType::Semicolon,
+                ..
+            }),
+        ) {
+            return Err(ParsingError::new(
+                first_token.line,
+                ParsingErrorType::ExpectedSemicolon,
+            ));
+        }
+        return_value
+    }
+
+    pub fn program(&mut self) -> Result<Program, ParsingError> {
+        let mut statements = Vec::new();
+        while !matches!(
+            self.peek(),
+            Some(Token {
+                token_type: TokenType::Eof,
+                ..
+            })
+        ) {
+            statements.push(self.statement()?);
+        }
+        Ok(statements)
+    }
+
+    pub fn parse_program(&mut self) -> Result<Program, ParsingError> {
+        self.program()
+    }
+
+    pub fn parse_ast(&mut self) -> Result<Ast, ParsingError> {
         self.ast()
     }
 }
@@ -155,6 +208,13 @@ impl Parser {
 #[derive(Debug)]
 pub enum Ast {
     Expr(Expr),
+}
+
+pub type Program = Vec<Statement>;
+
+pub enum Statement {
+    Expr(Expr),
+    Print(Expr),
 }
 
 #[derive(Debug)]
@@ -187,6 +247,8 @@ pub enum ParsingErrorType {
     UnbalancedGrouping,
     #[error("Invalid expression")]
     InvalidExpression,
+    #[error("Expected semicolon")]
+    ExpectedSemicolon,
 }
 
 #[derive(Error, Debug)]
