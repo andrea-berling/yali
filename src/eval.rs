@@ -160,7 +160,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l > r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeNumbers,
+                    ))
                 }
             }
             TokenType::GreaterEqual => {
@@ -169,7 +172,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l >= r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeNumbers,
+                    ))
                 }
             }
             TokenType::Less => {
@@ -178,7 +184,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l < r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeNumbers,
+                    ))
                 }
             }
             TokenType::LessEqual => {
@@ -187,7 +196,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l <= r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeNumbers,
+                    ))
                 }
             }
             _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
