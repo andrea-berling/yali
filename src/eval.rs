@@ -53,9 +53,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::Bang => match eval_expr(expr)? {
-                EvalResult::Bool(b) => Ok(EvalResult::Bool(!b)),
-                EvalResult::Nil => Ok(EvalResult::Bool(true)),
-                _ => Err(EvalError::IvalidOperand),
+                EvalResult::Bool(false) | EvalResult::Nil => Ok(EvalResult::Bool(true)),
+                _ => Ok(EvalResult::Bool(false)),
             },
             _ => Err(EvalError::IvalidOperator),
         },
