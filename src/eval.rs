@@ -24,6 +24,8 @@ pub enum EvalErrorType {
     OperandMustBeANumber,
     #[error("Operands must be numbers.")]
     OperandsMustBeNumbers,
+    #[error("Operands must be two numbers or two strings.")]
+    OperandsMustBeTwoNumbersOrTwoStrings,
 }
 
 #[derive(Debug)]
@@ -86,7 +88,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     (EvalResult::String(l), EvalResult::String(r)) => {
                         Ok(EvalResult::String(format!("{}{}", l, r)))
                     }
-                    _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
+                    _ => Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeTwoNumbersOrTwoStrings,
+                    )),
                 }
             }
             TokenType::Minus => {
@@ -95,7 +100,10 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l - r))
                 } else {
-                    Err(EvalError::new(token.line, EvalErrorType::IvalidOperator))
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::OperandsMustBeTwoNumbersOrTwoStrings,
+                    ))
                 }
             }
 
