@@ -68,6 +68,10 @@ impl Environment {
         self.0.push_front(std::collections::HashMap::new());
     }
 
+    pub fn drop_scope(&mut self) {
+        self.0.pop_front();
+    }
+
     pub fn set(
         &mut self,
         name: String,
@@ -132,6 +136,7 @@ impl Interpreter {
                 for declaration in declarations.iter() {
                     self.declaration(declaration)?;
                 }
+                self.state.environment.drop_scope();
                 Ok(())
             }
         }
