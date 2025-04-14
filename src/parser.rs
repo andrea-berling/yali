@@ -57,12 +57,14 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Result<Expr, ParsingError> {
-        let Some(Token {
-            token_type,
-            value,
-            lexeme,
-            line,
-        }) = self.advance()
+        let Some(
+            token @ Token {
+                token_type,
+                value,
+                lexeme,
+                line,
+            },
+        ) = self.advance()
         else {
             return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
         };
@@ -74,20 +76,15 @@ impl Parser {
             | (TokenType::String, Some(l @ Literal::String(_))) => {
                 Ok(Expr::Literal(LiteralExpr::Lit(l.clone())))
             }
-            (TokenType::Keyword, _) => {
-                if lexeme == "true" {
-                    Ok(Expr::Literal(LiteralExpr::True))
-                } else if lexeme == "false" {
-                    Ok(Expr::Literal(LiteralExpr::False))
-                } else if lexeme == "nil" {
-                    Ok(Expr::Literal(LiteralExpr::Nil))
-                } else {
-                    return Err(ParsingError::new(
-                        line,
-                        ParsingErrorType::UnexpectedToken(lexeme.to_string()),
-                    ));
-                }
-            }
+            (TokenType::Keyword, _) => match lexeme.as_str() {
+                "true" => Ok(Expr::Literal(LiteralExpr::True)),
+                "false" => Ok(Expr::Literal(LiteralExpr::False)),
+                "nil" => Ok(Expr::Literal(LiteralExpr::Nil)),
+                _ => Err(ParsingError::new(
+                    line,
+                    ParsingErrorType::UnexpectedToken(lexeme.to_string()),
+                )),
+            },
             (TokenType::LeftParen, _) => {
                 let expr = self.expr()?;
                 if !matches!(
@@ -104,6 +101,7 @@ impl Parser {
                 }
                 Ok(Expr::Grouping(Box::new(expr)))
             }
+            (TokenType::Identifier, _) => Ok(Expr::Var(token.clone())),
             _ => Err(ParsingError::new(
                 line,
                 ParsingErrorType::UnexpectedToken(lexeme.clone()),
@@ -182,8 +180,69 @@ impl Parser {
         return_value
     }
 
+    pub fn var_declaration(&mut self) -> Result<Declaration, ParsingError> {
+        if !matches!(self.advance(),
+        Some(Token {
+            token_type: TokenType::Keyword,
+            lexeme,
+            ..
+        }) if lexeme == "var")
+        {
+            return Err(ParsingError::new(0, ParsingErrorType::ExpectedVar));
+        }
+        let Some(
+            identifier_token @ Token {
+                token_type: TokenType::Identifier,
+                ..
+            },
+        ) = self.advance()
+        else {
+            return Err(ParsingError::new(0, ParsingErrorType::ExpectedIdentifier));
+        };
+
+        let identifier_token = identifier_token.clone();
+
+        let expression = if let Some(Token {
+            token_type: TokenType::Equal,
+            ..
+        }) = self.peek()
+        {
+            self.advance();
+            Some(self.expr()?)
+        } else {
+            None
+        };
+
+        if !matches!(
+            self.advance(),
+            Some(Token {
+                token_type: TokenType::Semicolon,
+                ..
+            })
+        ) {
+            return Err(ParsingError::new(
+                identifier_token.line,
+                ParsingErrorType::ExpectedSemicolon,
+            ));
+        }
+
+        Ok(Declaration::Var(identifier_token, expression))
+    }
+
+    pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
+        match self.peek() {
+            None => Err(ParsingError::new(0, ParsingErrorType::NothingToParse)),
+            Some(Token {
+                token_type: TokenType::Keyword,
+                lexeme,
+                ..
+            }) if lexeme == "var" => Ok(self.var_declaration()?),
+            _ => Ok(Declaration::Statement(self.statement()?)),
+        }
+    }
+
     pub fn program(&mut self) -> Result<Program, ParsingError> {
-        let mut statements = Vec::new();
+        let mut declarations = Vec::new();
         while !matches!(
             self.peek(),
             Some(Token {
@@ -191,9 +250,9 @@ impl Parser {
                 ..
             })
         ) {
-            statements.push(self.statement()?);
+            declarations.push(self.declaration()?);
         }
-        Ok(statements)
+        Ok(declarations)
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParsingError> {
@@ -210,22 +269,30 @@ pub enum Ast {
     Expr(Expr),
 }
 
-pub type Program = Vec<Statement>;
+pub type Program = Vec<Declaration>;
 
+#[derive(Clone)]
+pub enum Declaration {
+    Var(Token, Option<Expr>),
+    Statement(Statement),
+}
+
+#[derive(Clone)]
 pub enum Statement {
     Expr(Expr),
     Print(Expr),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Literal(LiteralExpr),
     Unary(Token, Box<Expr>),
     Binary(Box<Expr>, Token, Box<Expr>),
     Grouping(Box<Expr>),
+    Var(Token),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LiteralExpr {
     Lit(Literal),
     True,
@@ -249,6 +316,10 @@ pub enum ParsingErrorType {
     InvalidExpression,
     #[error("Expected semicolon")]
     ExpectedSemicolon,
+    #[error("Expected 'var'")]
+    ExpectedVar,
+    #[error("Expected identifier")]
+    ExpectedIdentifier,
 }
 
 #[derive(Error, Debug)]
@@ -280,6 +351,7 @@ pub trait Visit {
                 self.visit_expr(*expr1);
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
+            Expr::Var(_) => todo!(),
         }
     }
 
@@ -340,6 +412,7 @@ impl Visit for AstPrinter {
                 print!(")");
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
+            Expr::Var(token) => todo!(),
         }
     }
 }

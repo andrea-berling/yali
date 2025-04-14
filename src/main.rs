@@ -2,14 +2,14 @@ use std::env;
 use std::fs;
 
 mod eval;
+mod interpreter;
 mod lexer;
 mod parser;
-mod run;
 
 use eval::eval_ast;
+use interpreter::Interpreter;
 use lexer::tokenize;
 use parser::{AstPrinter, Visit};
-use run::run_program;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -68,7 +68,7 @@ fn main() {
                 },
                 "run" => match parser.parse_program() {
                     Ok(program) => {
-                        if run_program(&program).is_err() {
+                        if Interpreter::new(program.clone()).run().is_err() {
                             exit_code = 70;
                         };
                     }

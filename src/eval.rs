@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use thiserror::Error;
 
+use crate::interpreter::{Environment, Value};
 use crate::lexer::TokenType;
 use crate::parser::{Ast, Expr, Program, Statement};
 
@@ -51,7 +52,7 @@ impl Display for EvalResult {
     }
 }
 
-pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
+pub fn eval_expr(expr: &Expr, environment: &Option<Environment>) -> Result<EvalResult, EvalError> {
     match expr {
         Expr::Literal(literal_expr) => match literal_expr {
             crate::parser::LiteralExpr::Lit(literal) => match literal {
@@ -64,7 +65,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
         },
         Expr::Unary(token, expr) => match token.token_type {
             TokenType::Minus => {
-                if let EvalResult::Number(n) = eval_expr(expr)? {
+                if let EvalResult::Number(n) = eval_expr(expr, environment)? {
                     Ok(EvalResult::Number(-n))
                 } else {
                     Err(EvalError::new(
@@ -73,7 +74,7 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                     ))
                 }
             }
-            TokenType::Bang => match eval_expr(expr)? {
+            TokenType::Bang => match eval_expr(expr, environment)? {
                 EvalResult::Bool(false) | EvalResult::Nil => Ok(EvalResult::Bool(true)),
                 _ => Ok(EvalResult::Bool(false)),
             },
@@ -81,8 +82,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
         },
         Expr::Binary(expr, token, expr1) => match &token.token_type {
             TokenType::Plus => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 match (left, right) {
                     (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Number(l + r)),
                     (EvalResult::String(l), EvalResult::String(r)) => {
@@ -95,8 +96,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::Minus => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l - r))
                 } else {
@@ -108,8 +109,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
             }
 
             TokenType::Star => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l * r))
                 } else {
@@ -120,8 +121,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::Slash => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     if r == 0.0 {
                         return Err(EvalError::new(token.line, EvalErrorType::IvalidOperator));
@@ -135,8 +136,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::EqualEqual => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 match (left, right) {
                     (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Bool(l == r)),
                     (EvalResult::String(l), EvalResult::String(r)) => Ok(EvalResult::Bool(l == r)),
@@ -145,8 +146,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::BangEqual => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 match (left, right) {
                     (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Bool(l != r)),
                     (EvalResult::String(l), EvalResult::String(r)) => Ok(EvalResult::Bool(l != r)),
@@ -155,8 +156,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::Greater => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l > r))
                 } else {
@@ -167,8 +168,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::GreaterEqual => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l >= r))
                 } else {
@@ -179,8 +180,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::Less => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l < r))
                 } else {
@@ -191,8 +192,8 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
                 }
             }
             TokenType::LessEqual => {
-                let left = eval_expr(expr)?;
-                let right = eval_expr(expr1)?;
+                let left = eval_expr(expr, environment)?;
+                let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l <= r))
                 } else {
@@ -204,12 +205,28 @@ pub fn eval_expr(expr: &Expr) -> Result<EvalResult, EvalError> {
             }
             _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
         },
-        Expr::Grouping(expr) => eval_expr(expr),
+        Expr::Grouping(expr) => eval_expr(expr, environment),
+        Expr::Var(token) => {
+            if let Some(env) = environment {
+                if let Some(value) = env.get(&token.lexeme) {
+                    match value {
+                        Some(Value::Number(n)) => Ok(EvalResult::Number(*n)),
+                        Some(Value::String(s)) => Ok(EvalResult::String(s.clone())),
+                        Some(Value::Boolean(b)) => Ok(EvalResult::Bool(*b)),
+                        None => Ok(EvalResult::Nil),
+                    }
+                } else {
+                    todo!()
+                }
+            } else {
+                todo!()
+            }
+        }
     }
 }
 
 pub fn eval_ast(ast: &Ast) -> Result<EvalResult, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(expr),
+        Ast::Expr(expr) => eval_expr(expr, &None),
     }
 }
