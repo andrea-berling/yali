@@ -56,6 +56,14 @@ impl Parser {
         }
     }
 
+    fn peek2(&self) -> Option<&Token> {
+        if self.position + 1 < self.tokens.len() {
+            Some(&self.tokens[self.position + 1])
+        } else {
+            None
+        }
+    }
+
     fn primary(&mut self) -> Result<Expr, ParsingError> {
         let Some(
             token @ Token {
@@ -129,8 +137,33 @@ impl Parser {
         factor,unary,TokenType::Slash | TokenType::Star
     }
 
+    fn assigment(&mut self) -> Result<Expr, ParsingError> {
+        let Some(next_token) = self.peek() else {
+            return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
+        };
+        if matches!(next_token.token_type, TokenType::Identifier)
+            && matches!(
+                self.peek2(),
+                Some(Token {
+                    token_type: TokenType::Equal,
+                    ..
+                })
+            )
+        {
+            let identifier_token = self.advance().unwrap().clone();
+            self.advance();
+            let assignment = self.assigment()?;
+            Ok(Expr::Assign(
+                identifier_token.clone(),
+                Box::new(assignment.clone()),
+            ))
+        } else {
+            self.equality()
+        }
+    }
+
     fn expr(&mut self) -> Result<Expr, ParsingError> {
-        self.equality()
+        self.assigment()
     }
 
     fn ast(&mut self) -> Result<Ast, ParsingError> {
@@ -271,13 +304,13 @@ pub enum Ast {
 
 pub type Program = Vec<Declaration>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Declaration {
     Var(Token, Option<Expr>),
     Statement(Statement),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Statement {
     Expr(Expr),
     Print(Expr),
@@ -290,6 +323,7 @@ pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>),
     Grouping(Box<Expr>),
     Var(Token),
+    Assign(Token, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -320,6 +354,8 @@ pub enum ParsingErrorType {
     ExpectedVar,
     #[error("Expected identifier")]
     ExpectedIdentifier,
+    #[error("Expected equal sign")]
+    ExpectedEqualSign,
 }
 
 #[derive(Error, Debug)]
@@ -352,6 +388,7 @@ pub trait Visit {
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
             Expr::Var(_) => todo!(),
+            Expr::Assign(token, expr) => todo!(),
         }
     }
 
@@ -413,6 +450,7 @@ impl Visit for AstPrinter {
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
             Expr::Var(token) => todo!(),
+            Expr::Assign(token, expr) => todo!(),
         }
     }
 }

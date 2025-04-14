@@ -1,5 +1,5 @@
 use crate::{
-    eval::{eval_expr, EvalError},
+    eval::{eval_expr, EvalError, EvalResult},
     parser::{Declaration, Program, Statement},
 };
 
@@ -48,22 +48,26 @@ impl Interpreter {
         }
     }
 
-    pub fn statement(&self, statement: &Statement) -> Result<(), RuntimeError> {
+    pub fn statement(&mut self, statement: &Statement) -> Result<(), RuntimeError> {
         match statement {
-            Statement::Expr(expr) => {
-                if let Err(err) = eval_expr(expr, &Some(self.state.variables.clone())) {
-                    eprintln!("{}\n[line {}]", err.error, err.line);
-                    return Err(RuntimeError::new(err.line, RuntimeErrorType::EvalError));
+            Statement::Expr(expr) => match eval_expr(expr, Some(&self.state.variables.clone())) {
+                Ok(eval_result) => {
+                    self.maybe_assign(&eval_result);
+                    Ok(())
                 }
-                Ok(())
-            }
-            Statement::Print(expr) => match eval_expr(expr, &Some(self.state.variables.clone())) {
+                Err(err) => {
+                    eprintln!("{}\n[line {}]", err.error, err.line);
+                    Err(RuntimeError::new(err.line, RuntimeErrorType::EvalError))
+                }
+            },
+            Statement::Print(expr) => match eval_expr(expr, Some(&self.state.variables.clone())) {
                 Err(EvalError { line, error }) => {
                     eprintln!("{}\n[line {}]", error, line);
                     Err(RuntimeError::new(line, RuntimeErrorType::EvalError))
                 }
-                Ok(result) => {
-                    println!("{}", result);
+                Ok(eval_result) => {
+                    self.maybe_assign(&eval_result);
+                    println!("{}", eval_result);
                     Ok(())
                 }
             },
@@ -75,22 +79,15 @@ impl Interpreter {
             Declaration::Var(ident_token, expr) => {
                 match expr {
                     Some(expr) => {
-                        self.state.variables.insert(
-                            ident_token.lexeme.clone(),
-                            match eval_expr(expr, &Some(self.state.variables.clone())).map_err(
-                                |err| {
-                                    eprintln!("{}\n[line {}]", err.error, err.line);
-                                    RuntimeError::new(err.line, RuntimeErrorType::EvalError)
-                                },
-                            )? {
-                                crate::eval::EvalResult::Number(n) => Some(Value::Number(n)),
-                                crate::eval::EvalResult::String(s) => {
-                                    Some(Value::String(s.clone()))
-                                }
-                                crate::eval::EvalResult::Bool(b) => Some(Value::Boolean(b)),
-                                crate::eval::EvalResult::Nil => None,
-                            },
+                        let value_to_insert = Self::eval_result_to_value(
+                            &eval_expr(expr, Some(&self.state.variables)).map_err(|err| {
+                                eprintln!("{}\n[line {}]", err.error, err.line);
+                                RuntimeError::new(err.line, RuntimeErrorType::EvalError)
+                            })?,
                         );
+                        self.state
+                            .variables
+                            .insert(ident_token.lexeme.clone(), value_to_insert);
                     }
                     None => {
                         self.state
@@ -110,8 +107,28 @@ impl Interpreter {
 
     pub fn run(&mut self) -> Result<(), RuntimeError> {
         for declaration in self.program.clone().iter() {
-            self.declaration(&declaration)?;
+            self.declaration(declaration)?;
         }
         Ok(())
+    }
+
+    fn eval_result_to_value(eval_result: &EvalResult) -> Option<Value> {
+        match eval_result {
+            EvalResult::Number(n) => Some(Value::Number(*n)),
+            EvalResult::String(s) => Some(Value::String(s.clone())),
+            EvalResult::Bool(b) => Some(Value::Boolean(*b)),
+            EvalResult::Nil => None,
+            EvalResult::Assign(_, eval_result) => Self::eval_result_to_value(eval_result),
+        }
+    }
+
+    fn maybe_assign(&mut self, eval_result: &EvalResult) {
+        if let EvalResult::Assign(var_token, eval_result) = eval_result {
+            self.state.variables.insert(
+                var_token.lexeme.clone(),
+                Self::eval_result_to_value(eval_result),
+            );
+            self.maybe_assign(eval_result)
+        }
     }
 }

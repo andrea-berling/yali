@@ -3,14 +3,16 @@ use std::fmt::{Display, Formatter};
 use thiserror::Error;
 
 use crate::interpreter::{Environment, Value};
-use crate::lexer::TokenType;
+use crate::lexer::{Token, TokenType};
 use crate::parser::{Ast, Expr, Program, Statement};
 
+#[derive(Debug)]
 pub enum EvalResult {
     Number(f64),
     String(String),
     Bool(bool),
     Nil,
+    Assign(Token, Box<EvalResult>),
 }
 
 #[derive(Debug, Error)]
@@ -50,11 +52,12 @@ impl Display for EvalResult {
             EvalResult::String(s) => write!(f, "{}", s),
             EvalResult::Bool(b) => write!(f, "{}", b),
             EvalResult::Nil => write!(f, "nil"),
+            EvalResult::Assign(_, eval_result) => write!(f, "{eval_result}"),
         }
     }
 }
 
-pub fn eval_expr(expr: &Expr, environment: &Option<Environment>) -> Result<EvalResult, EvalError> {
+pub fn eval_expr(expr: &Expr, environment: Option<&Environment>) -> Result<EvalResult, EvalError> {
     match expr {
         Expr::Literal(literal_expr) => match literal_expr {
             crate::parser::LiteralExpr::Lit(literal) => match literal {
@@ -227,11 +230,15 @@ pub fn eval_expr(expr: &Expr, environment: &Option<Environment>) -> Result<EvalR
                 todo!()
             }
         }
+        Expr::Assign(token, expr) => {
+            let result = eval_expr(expr, environment)?;
+            Ok(EvalResult::Assign(token.clone(), Box::new(result)))
+        }
     }
 }
 
 pub fn eval_ast(ast: &Ast) -> Result<EvalResult, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(expr, &None),
+        Ast::Expr(expr) => eval_expr(expr, None),
     }
 }
