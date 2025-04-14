@@ -78,7 +78,10 @@ impl Interpreter {
                         self.state.variables.insert(
                             ident_token.lexeme.clone(),
                             match eval_expr(expr, &Some(self.state.variables.clone())).map_err(
-                                |err| RuntimeError::new(err.line, RuntimeErrorType::EvalError),
+                                |err| {
+                                    eprintln!("{}\n[line {}]", err.error, err.line);
+                                    RuntimeError::new(err.line, RuntimeErrorType::EvalError)
+                                },
                             )? {
                                 crate::eval::EvalResult::Number(n) => Some(Value::Number(n)),
                                 crate::eval::EvalResult::String(s) => {

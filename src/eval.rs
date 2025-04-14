@@ -27,6 +27,8 @@ pub enum EvalErrorType {
     OperandsMustBeNumbers,
     #[error("Operands must be two numbers or two strings.")]
     OperandsMustBeTwoNumbersOrTwoStrings,
+    #[error("Undefined variable '{0}'.")]
+    UndefinedVariable(String),
 }
 
 #[derive(Debug)]
@@ -216,7 +218,10 @@ pub fn eval_expr(expr: &Expr, environment: &Option<Environment>) -> Result<EvalR
                         None => Ok(EvalResult::Nil),
                     }
                 } else {
-                    todo!()
+                    Err(EvalError::new(
+                        token.line,
+                        EvalErrorType::UndefinedVariable(token.lexeme.clone()),
+                    ))
                 }
             } else {
                 todo!()
