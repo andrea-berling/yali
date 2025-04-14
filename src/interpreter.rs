@@ -43,7 +43,7 @@ pub struct Interpreter {
 
 impl Environment {
     pub fn new() -> Self {
-        Self(VecDeque::new())
+        Self(VecDeque::from(vec![std::collections::HashMap::new()]))
     }
 
     pub fn get(&self, name: &str) -> Option<&Option<Value>> {
