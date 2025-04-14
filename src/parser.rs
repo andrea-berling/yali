@@ -192,19 +192,50 @@ impl Parser {
                 let expr = self.expr()?;
                 Ok(Statement::Print(expr))
             }
+            Token {
+                token_type: TokenType::LeftBrace,
+                ..
+            } => {
+                self.advance();
+                let mut statements = vec![];
+                while !matches!(
+                    self.peek(),
+                    Some(Token {
+                        token_type: TokenType::RightBrace | TokenType::Eof,
+                        ..
+                    })
+                ) {
+                    statements.push(self.declaration()?);
+                }
+                if let Some(Token {
+                    token_type: TokenType::Eof,
+                    line,
+                    ..
+                }) = self.peek()
+                {
+                    return Err(ParsingError::new(
+                        *line - 1,
+                        ParsingErrorType::UnexpectedEof("}".to_string()),
+                    ));
+                }
+                self.advance();
+                Ok(Statement::Block(statements))
+            }
             _ => {
                 let expr = self.expr()?;
                 Ok(Statement::Expr(expr))
             }
         };
 
-        if !matches!(
-            self.advance(),
-            Some(Token {
-                token_type: TokenType::Semicolon,
-                ..
-            }),
-        ) {
+        if !matches!(return_value, Ok(Statement::Block(_)))
+            && !matches!(
+                self.advance(),
+                Some(Token {
+                    token_type: TokenType::Semicolon,
+                    ..
+                }),
+            )
+        {
             return Err(ParsingError::new(
                 first_token.line,
                 ParsingErrorType::ExpectedSemicolon,
@@ -314,6 +345,7 @@ pub enum Declaration {
 pub enum Statement {
     Expr(Expr),
     Print(Expr),
+    Block(Vec<Declaration>),
 }
 
 #[derive(Clone, Debug)]
@@ -356,6 +388,8 @@ pub enum ParsingErrorType {
     ExpectedIdentifier,
     #[error("Expected equal sign")]
     ExpectedEqualSign,
+    #[error("Error at end: Expect '{0}'")]
+    UnexpectedEof(String),
 }
 
 #[derive(Error, Debug)]

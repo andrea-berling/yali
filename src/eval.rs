@@ -57,7 +57,7 @@ impl Display for EvalResult {
     }
 }
 
-pub fn eval_expr(expr: &Expr, environment: Option<&Environment>) -> Result<EvalResult, EvalError> {
+pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, EvalError> {
     match expr {
         Expr::Literal(literal_expr) => match literal_expr {
             crate::parser::LiteralExpr::Lit(literal) => match literal {
@@ -212,22 +212,18 @@ pub fn eval_expr(expr: &Expr, environment: Option<&Environment>) -> Result<EvalR
         },
         Expr::Grouping(expr) => eval_expr(expr, environment),
         Expr::Var(token) => {
-            if let Some(env) = environment {
-                if let Some(value) = env.get(&token.lexeme) {
-                    match value {
-                        Some(Value::Number(n)) => Ok(EvalResult::Number(*n)),
-                        Some(Value::String(s)) => Ok(EvalResult::String(s.clone())),
-                        Some(Value::Boolean(b)) => Ok(EvalResult::Bool(*b)),
-                        None => Ok(EvalResult::Nil),
-                    }
-                } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::UndefinedVariable(token.lexeme.clone()),
-                    ))
+            if let Some(value) = environment.get(&token.lexeme) {
+                match value {
+                    Some(Value::Number(n)) => Ok(EvalResult::Number(*n)),
+                    Some(Value::String(s)) => Ok(EvalResult::String(s.clone())),
+                    Some(Value::Boolean(b)) => Ok(EvalResult::Bool(*b)),
+                    None => Ok(EvalResult::Nil),
                 }
             } else {
-                todo!()
+                Err(EvalError::new(
+                    token.line,
+                    EvalErrorType::UndefinedVariable(token.lexeme.clone()),
+                ))
             }
         }
         Expr::Assign(token, expr) => {
@@ -239,6 +235,6 @@ pub fn eval_expr(expr: &Expr, environment: Option<&Environment>) -> Result<EvalR
 
 pub fn eval_ast(ast: &Ast) -> Result<EvalResult, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(expr, None),
+        Ast::Expr(expr) => eval_expr(expr, &Environment::new()),
     }
 }
