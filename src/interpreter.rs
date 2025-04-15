@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, fmt::Display};
 
 use crate::{
     eval::{eval_expr, EvalError, EvalResult},
@@ -29,6 +29,16 @@ pub enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Number(n) => write!(f, "{n}"),
+            Value::String(s) => write!(f, "{s}"),
+            Value::Boolean(b) => write!(f, "{b}"),
+        }
+    }
 }
 
 pub struct Environment(VecDeque<std::collections::HashMap<String, Option<Value>>>);
@@ -129,7 +139,9 @@ impl Interpreter {
                 }
                 Ok(eval_result) => {
                     self.maybe_assign(&eval_result)?;
-                    println!("{}", eval_result);
+                    if let Some(value) = Self::eval_result_to_value(&eval_result) {
+                        println!("{value}");
+                    }
                     Ok(())
                 }
             },
