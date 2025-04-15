@@ -141,6 +141,8 @@ impl Interpreter {
                     self.maybe_assign(&eval_result)?;
                     if let Some(value) = Self::eval_result_to_value(&eval_result) {
                         println!("{value}");
+                    } else {
+                        println!("nil")
                     }
                     Ok(())
                 }
