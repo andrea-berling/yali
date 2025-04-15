@@ -155,7 +155,7 @@ impl Interpreter {
                 self.state.environment.drop_scope();
                 Ok(())
             }
-            Statement::IfStmt(condition, if_statement, else_statement) => {
+            Statement::If(condition, if_statement, else_statement) => {
                 let eval_result = eval_expr(condition, &self.state.environment).map_err(|err| {
                     eprintln!("{}\n[line {}]", err.error, err.line);
                     RuntimeError::new(err.line, RuntimeErrorType::EvalError)
@@ -166,6 +166,25 @@ impl Interpreter {
                     self.statement(if_statement)?;
                 } else if let Some(else_statement) = else_statement {
                     self.statement(else_statement)?;
+                }
+                Ok(())
+            }
+            Statement::While(while_condition, statement) => {
+                let eval_result =
+                    eval_expr(while_condition, &self.state.environment).map_err(|err| {
+                        eprintln!("{}\n[line {}]", err.error, err.line);
+                        RuntimeError::new(err.line, RuntimeErrorType::EvalError)
+                    })?;
+                let mut condition = Self::eval_result_to_value(&eval_result);
+                while condition.is_some_and(|condition| !matches!(condition, Value::Boolean(false)))
+                {
+                    self.statement(statement)?;
+                    condition = Self::eval_result_to_value(
+                        &eval_expr(while_condition, &self.state.environment).map_err(|err| {
+                            eprintln!("{}\n[line {}]", err.error, err.line);
+                            RuntimeError::new(err.line, RuntimeErrorType::EvalError)
+                        })?,
+                    );
                 }
                 Ok(())
             }

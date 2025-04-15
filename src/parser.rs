@@ -251,32 +251,36 @@ impl Parser {
                 token_type: TokenType::Keyword,
                 lexeme,
                 ..
-            } if lexeme == "if" => {
+            } if lexeme == "if" || lexeme == "while" => {
                 self.advance();
                 expect!(self, TokenType::LeftParen);
                 let condition = self.expr()?;
                 expect!(self, TokenType::RightParen);
                 let body = self.statement()?;
-                let else_body = if let Some(Token {
-                    token_type: TokenType::Keyword,
-                    lexeme,
-                    ..
-                }) = self.peek()
-                {
-                    if lexeme == "else" {
-                        self.advance();
-                        Some(self.statement()?)
+                if lexeme == "if" {
+                    let else_body = if let Some(Token {
+                        token_type: TokenType::Keyword,
+                        lexeme,
+                        ..
+                    }) = self.peek()
+                    {
+                        if lexeme == "else" {
+                            self.advance();
+                            Some(self.statement()?)
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
+                    };
+                    Ok(Statement::If(
+                        condition,
+                        Box::new(body),
+                        else_body.map(Box::new),
+                    ))
                 } else {
-                    None
-                };
-                Ok(Statement::IfStmt(
-                    condition,
-                    Box::new(body),
-                    else_body.map(Box::new),
-                ))
+                    Ok(Statement::While(condition, Box::new(body)))
+                }
             }
             _ => {
                 let expr = self.expr()?;
@@ -286,7 +290,7 @@ impl Parser {
 
         if !matches!(
             return_value,
-            Ok(Statement::Block(_) | Statement::IfStmt(_, _, _))
+            Ok(Statement::Block(_) | Statement::If(_, _, _) | Statement::While(_, _))
         ) && !matches!(
             self.advance(),
             Some(Token {
@@ -443,7 +447,8 @@ pub enum Statement {
     Expr(Expr),
     Print(Expr),
     Block(Vec<Declaration>),
-    IfStmt(Expr, Box<Statement>, Option<Box<Statement>>),
+    If(Expr, Box<Statement>, Option<Box<Statement>>),
+    While(Expr, Box<Statement>),
 }
 
 #[derive(Clone, Debug)]
