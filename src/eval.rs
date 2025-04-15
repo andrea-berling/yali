@@ -13,6 +13,7 @@ pub enum EvalResult {
     Bool(bool),
     Nil,
     Assign(Token, Box<EvalResult>),
+    Logical(Token, Box<EvalResult>, Box<EvalResult>),
 }
 
 #[derive(Debug, Error)]
@@ -53,6 +54,7 @@ impl Display for EvalResult {
             EvalResult::Bool(b) => write!(f, "{}", b),
             EvalResult::Nil => write!(f, "nil"),
             EvalResult::Assign(_, eval_result) => write!(f, "{eval_result}"),
+            EvalResult::Logical(token, eval_result, eval_result1) => todo!(),
         }
     }
 }
@@ -229,6 +231,15 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
         Expr::Assign(token, expr) => {
             let result = eval_expr(expr, environment)?;
             Ok(EvalResult::Assign(token.clone(), Box::new(result)))
+        }
+        Expr::Logical(expr1, operator, expr2) => {
+            let result1 = eval_expr(expr1, environment)?;
+            let result2 = eval_expr(expr2, environment)?;
+            Ok(EvalResult::Logical(
+                operator.clone(),
+                Box::new(result1),
+                Box::new(result2),
+            ))
         }
     }
 }

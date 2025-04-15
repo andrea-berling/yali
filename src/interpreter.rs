@@ -113,6 +113,7 @@ impl Interpreter {
         match statement {
             Statement::Expr(expr) => match eval_expr(expr, &self.state.environment) {
                 Ok(eval_result) => {
+                    //println!("{eval_result:#?}");
                     self.maybe_assign(&eval_result)?;
                     Ok(())
                 }
@@ -146,14 +147,8 @@ impl Interpreter {
                     RuntimeError::new(err.line, RuntimeErrorType::EvalError)
                 })?;
                 self.maybe_assign(&eval_result)?;
-                let Some(Value::Boolean(condition)) = Self::eval_result_to_value(&eval_result)
-                else {
-                    return Err(RuntimeError::new(
-                        0,
-                        RuntimeErrorType::ConditionMustBeBoolean,
-                    ));
-                };
-                if condition {
+                let condition = Self::eval_result_to_value(&eval_result);
+                if condition.is_some_and(|condition| !matches!(condition, Value::Boolean(false))) {
                     self.statement(if_statement)?;
                 } else if let Some(else_statement) = else_statement {
                     self.statement(else_statement)?;
@@ -210,6 +205,18 @@ impl Interpreter {
             EvalResult::Bool(b) => Some(Value::Boolean(*b)),
             EvalResult::Nil => None,
             EvalResult::Assign(_, eval_result) => Self::eval_result_to_value(eval_result),
+            EvalResult::Logical(token, eval_result1, eval_result2) => match (
+                Self::eval_result_to_value(eval_result1),
+                token.lexeme.as_str(),
+            ) {
+                (None | Some(Value::Boolean(false)), "or") => {
+                    Self::eval_result_to_value(eval_result2)
+                }
+                (result1, "or") => result1,
+                (result1 @ (None | Some(Value::Boolean(false))), "and") => result1,
+                (_, "and") => Self::eval_result_to_value(eval_result2),
+                _ => todo!("Shouldn't happen"),
+            },
         }
     }
 
@@ -221,6 +228,29 @@ impl Interpreter {
                 false,
             )?;
             return self.maybe_assign(eval_result);
+        } else if let EvalResult::Logical(token, eval_result1, eval_result2) = eval_result {
+            match (
+                Self::eval_result_to_value(eval_result1),
+                token.lexeme.as_str(),
+            ) {
+                (None | Some(Value::Boolean(false)), "or") => {
+                    self.maybe_assign(eval_result1)?;
+                    return self.maybe_assign(eval_result2);
+                }
+                (_, "or") => {
+                    return self.maybe_assign(eval_result1);
+                }
+                (None | Some(Value::Boolean(false)), "and") => {
+                    return self.maybe_assign(eval_result1);
+                }
+                (_, "and") => {
+                    self.maybe_assign(eval_result1)?;
+                    return self.maybe_assign(eval_result2);
+                }
+                _ => {
+                    todo!("Shouldn't happen");
+                }
+            }
         }
         Ok(())
     }

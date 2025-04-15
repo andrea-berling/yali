@@ -163,7 +163,7 @@ impl Parser {
         factor,unary,TokenType::Slash | TokenType::Star
     }
 
-    fn assigment(&mut self) -> Result<Expr, ParsingError> {
+    fn assignment(&mut self) -> Result<Expr, ParsingError> {
         let Some(next_token) = self.peek() else {
             return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
         };
@@ -177,19 +177,19 @@ impl Parser {
             )
         {
             let identifier_token = self.advance().unwrap().clone();
-            self.advance();
-            let assignment = self.assigment()?;
+            expect!(self, TokenType::Equal);
+            let assignment = self.assignment()?;
             Ok(Expr::Assign(
                 identifier_token.clone(),
                 Box::new(assignment.clone()),
             ))
         } else {
-            self.equality()
+            self.logic_or()
         }
     }
 
     fn expr(&mut self) -> Result<Expr, ParsingError> {
-        self.assigment()
+        self.assignment()
     }
 
     fn ast(&mut self) -> Result<Ast, ParsingError> {
@@ -384,6 +384,45 @@ impl Parser {
     pub fn parse_ast(&mut self) -> Result<Ast, ParsingError> {
         self.ast()
     }
+
+    // TODO: refactor this into the macro for binaries?
+    fn logic_or(&mut self) -> Result<Expr, ParsingError> {
+        let mut logic_or = self.logic_and()?;
+        while matches!(
+            self.peek(),
+            Some(
+                Token {
+                token_type: TokenType::Keyword,
+                lexeme,
+                ..
+            }
+            ) if lexeme == "or",
+        ) {
+            let operator = self.advance().unwrap().clone();
+            let logic_and = self.logic_and()?;
+            logic_or = Expr::Logical(Box::new(logic_or), operator, Box::new(logic_and));
+        }
+        Ok(logic_or)
+    }
+
+    fn logic_and(&mut self) -> Result<Expr, ParsingError> {
+        let mut logic_and = self.equality()?;
+        while matches!(
+            self.peek(),
+            Some(
+                Token {
+                token_type: TokenType::Keyword,
+                lexeme,
+                ..
+            }
+            ) if lexeme == "and",
+        ) {
+            let operator = self.advance().unwrap().clone();
+            let equality = self.equality()?;
+            logic_and = Expr::Logical(Box::new(logic_and), operator, Box::new(equality));
+        }
+        Ok(logic_and)
+    }
 }
 
 #[derive(Debug)]
@@ -415,6 +454,7 @@ pub enum Expr {
     Grouping(Box<Expr>),
     Var(Token),
     Assign(Token, Box<Expr>),
+    Logical(Box<Expr>, Token, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -482,6 +522,7 @@ pub trait Visit {
             Expr::Grouping(expr) => self.visit_grouping(*expr),
             Expr::Var(_) => todo!(),
             Expr::Assign(token, expr) => todo!(),
+            Expr::Logical(expr, token, expr1) => todo!(),
         }
     }
 
@@ -542,8 +583,18 @@ impl Visit for AstPrinter {
                 print!(")");
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
-            Expr::Var(token) => todo!(),
-            Expr::Assign(token, expr) => todo!(),
+            Expr::Var(token) => {
+                print!("{}", token.lexeme)
+            }
+            Expr::Assign(token, expr) => {
+                print!("{} = ", token.lexeme);
+                self.visit_expr(*expr)
+            }
+            Expr::Logical(expr1, token, expr2) => {
+                self.visit_expr(*expr1);
+                print!("{}", token.lexeme);
+                self.visit_expr(*expr2);
+            }
         }
     }
 }
