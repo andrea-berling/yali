@@ -2,7 +2,7 @@ use std::{collections::VecDeque, fmt::Display};
 
 use crate::{
     eval::{eval_expr, EvalError, EvalResult},
-    parser::{Declaration, Program, Statement},
+    parser::{Declaration, Expr, LiteralExpr, Program, Statement},
 };
 
 #[derive(Debug)]
@@ -186,6 +186,28 @@ impl Interpreter {
                         })?,
                     );
                 }
+                Ok(())
+            }
+            Statement::For(declaration, condition, increment, statement) => {
+                self.state.environment.add_scope();
+                if let Some(declaration) = declaration {
+                    self.declaration(declaration)?;
+                }
+                let while_condition = if let Some(condition) = condition {
+                    condition
+                } else {
+                    &Expr::Literal(LiteralExpr::True)
+                };
+                let body = if let Some(increment) = increment {
+                    Box::new(Statement::Block(vec![
+                        Declaration::Statement(*statement.clone()),
+                        Declaration::Statement(Statement::Expr(increment.clone())),
+                    ]))
+                } else {
+                    statement.clone()
+                };
+                self.statement(&Statement::While(while_condition.clone(), body))?;
+                self.state.environment.drop_scope();
                 Ok(())
             }
         }

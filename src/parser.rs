@@ -282,6 +282,65 @@ impl Parser {
                     Ok(Statement::While(condition, Box::new(body)))
                 }
             }
+            Token {
+                token_type: TokenType::Keyword,
+                lexeme,
+                ..
+            } if lexeme == "for" => {
+                expect!(self, TokenType::Keyword, "for");
+                expect!(self, TokenType::LeftParen);
+                let initializer = if !matches!(
+                    self.peek(),
+                    Some(Token {
+                        token_type: TokenType::Semicolon,
+                        ..
+                    })
+                ) {
+                    Some(self.declaration()?)
+                } else {
+                    expect!(self, TokenType::Semicolon);
+                    None
+                };
+                if !matches!(
+                    initializer,
+                    None | Some(
+                        Declaration::Var(_, _) | Declaration::Statement(Statement::Expr(_))
+                    ),
+                ) {
+                    todo!("Syntactic error")
+                }
+                let condition = if !matches!(
+                    self.peek(),
+                    Some(Token {
+                        token_type: TokenType::Semicolon,
+                        ..
+                    })
+                ) {
+                    Some(self.expr()?)
+                } else {
+                    None
+                };
+                expect!(self, TokenType::Semicolon);
+                let increment = if !matches!(
+                    self.peek(),
+                    Some(Token {
+                        token_type: TokenType::RightParen,
+                        ..
+                    })
+                ) {
+                    Some(self.expr()?)
+                } else {
+                    None
+                };
+                expect!(self, TokenType::RightParen);
+                let body = self.statement()?;
+                Ok(Statement::For(
+                    initializer.map(Box::new),
+                    condition,
+                    increment,
+                    Box::new(body),
+                ))
+            }
             _ => {
                 let expr = self.expr()?;
                 Ok(Statement::Expr(expr))
@@ -290,7 +349,10 @@ impl Parser {
 
         if !matches!(
             return_value,
-            Ok(Statement::Block(_) | Statement::If(_, _, _) | Statement::While(_, _))
+            Ok(Statement::Block(_)
+                | Statement::If(_, _, _)
+                | Statement::While(_, _)
+                | Statement::For(_, _, _, _))
         ) && !matches!(
             self.advance(),
             Some(Token {
@@ -449,6 +511,12 @@ pub enum Statement {
     Block(Vec<Declaration>),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
     While(Expr, Box<Statement>),
+    For(
+        Option<Box<Declaration>>,
+        Option<Expr>,
+        Option<Expr>,
+        Box<Statement>,
+    ),
 }
 
 #[derive(Clone, Debug)]
