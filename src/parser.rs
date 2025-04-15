@@ -307,7 +307,14 @@ impl Parser {
                         Declaration::Var(_, _) | Declaration::Statement(Statement::Expr(_))
                     ),
                 ) {
-                    todo!("Syntactic error")
+                    return Err(ParsingError::new(
+                        self.peek().map(|t| t.line).unwrap_or(0),
+                        ParsingErrorType::UnexpectedToken(
+                            self.peek()
+                                .map(|t| t.lexeme.clone())
+                                .unwrap_or("".to_string()),
+                        ),
+                    ));
                 }
                 let condition = if !matches!(
                     self.peek(),
