@@ -30,6 +30,32 @@ macro_rules! define_binary_expression_parsers {
     }
 }
 
+macro_rules! expect {
+    ($self: ident, $token_type:path$(,$lexeme:literal)?) => {
+        {
+            let next_token = $self.advance();
+            match next_token {
+                None => { return Err(ParsingError::new(0, ParsingErrorType::NothingToParse)); }
+                Some(token) => {
+                    if !matches!(token,
+                        Token {
+                            token_type: $token_type,
+                            lexeme: _lexeme,
+                            ..
+                        }
+                        $(if _lexeme == $lexeme)?
+                    ) {
+                        return Err(ParsingError::new(
+                            token.line,
+                            ParsingErrorType::UnexpectedToken(token.lexeme.clone()),
+                        ));
+                    }
+                }
+            }
+        }
+    };
+}
+
 impl Parser {
     pub fn new(tokens: &[Token]) -> Self {
         Self {
@@ -221,21 +247,53 @@ impl Parser {
                 self.advance();
                 Ok(Statement::Block(statements))
             }
+            Token {
+                token_type: TokenType::Keyword,
+                lexeme,
+                ..
+            } if lexeme == "if" => {
+                self.advance();
+                expect!(self, TokenType::LeftParen);
+                let condition = self.expr()?;
+                expect!(self, TokenType::RightParen);
+                let body = self.statement()?;
+                let else_body = if let Some(Token {
+                    token_type: TokenType::Keyword,
+                    lexeme,
+                    ..
+                }) = self.peek()
+                {
+                    if lexeme == "else" {
+                        self.advance();
+                        Some(self.statement()?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                Ok(Statement::IfStmt(
+                    condition,
+                    Box::new(body),
+                    else_body.map(Box::new),
+                ))
+            }
             _ => {
                 let expr = self.expr()?;
                 Ok(Statement::Expr(expr))
             }
         };
 
-        if !matches!(return_value, Ok(Statement::Block(_)))
-            && !matches!(
-                self.advance(),
-                Some(Token {
-                    token_type: TokenType::Semicolon,
-                    ..
-                }),
-            )
-        {
+        if !matches!(
+            return_value,
+            Ok(Statement::Block(_) | Statement::IfStmt(_, _, _))
+        ) && !matches!(
+            self.advance(),
+            Some(Token {
+                token_type: TokenType::Semicolon,
+                ..
+            }),
+        ) {
             return Err(ParsingError::new(
                 first_token.line,
                 ParsingErrorType::ExpectedSemicolon,
@@ -346,6 +404,7 @@ pub enum Statement {
     Expr(Expr),
     Print(Expr),
     Block(Vec<Declaration>),
+    IfStmt(Expr, Box<Statement>, Option<Box<Statement>>),
 }
 
 #[derive(Clone, Debug)]

@@ -9,6 +9,7 @@ use crate::{
 pub enum RuntimeErrorType {
     EvalError,
     UndefinedVariable(String),
+    ConditionMustBeBoolean,
 }
 
 #[derive(Debug)]
@@ -23,7 +24,7 @@ impl RuntimeError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -137,6 +138,26 @@ impl Interpreter {
                     self.declaration(declaration)?;
                 }
                 self.state.environment.drop_scope();
+                Ok(())
+            }
+            Statement::IfStmt(condition, if_statement, else_statement) => {
+                let eval_result = eval_expr(condition, &self.state.environment).map_err(|err| {
+                    eprintln!("{}\n[line {}]", err.error, err.line);
+                    RuntimeError::new(err.line, RuntimeErrorType::EvalError)
+                })?;
+                self.maybe_assign(&eval_result)?;
+                let Some(Value::Boolean(condition)) = Self::eval_result_to_value(&eval_result)
+                else {
+                    return Err(RuntimeError::new(
+                        0,
+                        RuntimeErrorType::ConditionMustBeBoolean,
+                    ));
+                };
+                if condition {
+                    self.statement(if_statement)?;
+                } else if let Some(else_statement) = else_statement {
+                    self.statement(else_statement)?;
+                }
                 Ok(())
             }
         }
