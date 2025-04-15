@@ -54,7 +54,9 @@ impl Display for EvalResult {
             EvalResult::Bool(b) => write!(f, "{}", b),
             EvalResult::Nil => write!(f, "nil"),
             EvalResult::Assign(_, eval_result) => write!(f, "{eval_result}"),
-            EvalResult::Logical(token, eval_result, eval_result1) => todo!(),
+            EvalResult::Logical(token, eval_result1, eval_result2) => {
+                write!(f, "{eval_result1} {} {eval_result2}", token.lexeme)
+            }
         }
     }
 }
