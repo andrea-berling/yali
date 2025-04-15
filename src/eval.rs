@@ -243,6 +243,19 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 Box::new(result2),
             ))
         }
+        Expr::FnCall(callee, token, vec) => match callee.as_ref() {
+            Expr::Var(Token {
+                token_type: TokenType::Identifier,
+                lexeme,
+                ..
+            }) if lexeme == "clock" => Ok(EvalResult::Number(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as f64,
+            )),
+            _ => todo!(),
+        },
     }
 }
 

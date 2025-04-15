@@ -123,7 +123,6 @@ impl Interpreter {
         match statement {
             Statement::Expr(expr) => match eval_expr(expr, &self.state.environment) {
                 Ok(eval_result) => {
-                    //println!("{eval_result:#?}");
                     self.maybe_assign(&eval_result)?;
                     Ok(())
                 }

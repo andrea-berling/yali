@@ -143,6 +143,52 @@ impl Parser {
         }
     }
 
+    fn arguments(&mut self) -> Result<Vec<Expr>, ParsingError> {
+        let mut arguments = vec![self.expr()?];
+        while matches!(
+            self.peek(),
+            Some(Token {
+                token_type: TokenType::Comma,
+                ..
+            })
+        ) {
+            expect!(self, TokenType::Comma);
+            arguments.push(self.expr()?);
+        }
+        Ok(arguments)
+    }
+
+    fn function_call(&mut self) -> Result<Expr, ParsingError> {
+        let callee = self.primary()?;
+        if matches!(
+            self.peek(),
+            Some(Token {
+                token_type: TokenType::LeftParen,
+                ..
+            })
+        ) {
+            let lparen = self.advance().unwrap().clone();
+            let mut arguments: Vec<Expr> = vec![];
+            if !matches!(
+                self.peek(),
+                Some(Token {
+                    token_type: TokenType::RightParen,
+                    ..
+                })
+            ) {
+                arguments.append(&mut self.arguments()?);
+            }
+            expect!(self, TokenType::RightParen);
+            Ok(Expr::FnCall(
+                Box::new(callee),
+                lparen,
+                arguments.into_iter().map(Box::new).collect(),
+            ))
+        } else {
+            Ok(callee)
+        }
+    }
+
     fn unary(&mut self) -> Result<Expr, ParsingError> {
         match self.peek() {
             Some(Token {
@@ -152,7 +198,7 @@ impl Parser {
                 let operator = self.advance().unwrap().clone();
                 Ok(Expr::Unary(operator, Box::new(self.unary()?)))
             }
-            _ => self.primary(),
+            _ => self.function_call(),
         }
     }
 
@@ -535,6 +581,7 @@ pub enum Expr {
     Var(Token),
     Assign(Token, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
+    FnCall(Box<Expr>, Token, Vec<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]
@@ -603,6 +650,7 @@ pub trait Visit {
             Expr::Var(_) => todo!(),
             Expr::Assign(token, expr) => todo!(),
             Expr::Logical(expr, token, expr1) => todo!(),
+            Expr::FnCall(expr, token, vec) => todo!(),
         }
     }
 
@@ -675,6 +723,7 @@ impl Visit for AstPrinter {
                 print!("{}", token.lexeme);
                 self.visit_expr(*expr2);
             }
+            Expr::FnCall(expr, token, vec) => todo!(),
         }
     }
 }
