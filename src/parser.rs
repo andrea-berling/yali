@@ -7,19 +7,26 @@ pub struct Parser {
     position: usize,
 }
 
+macro_rules! next_token_matches {
+    ($self: ident, $token_type:pat$(,$lexeme:literal)?) => {
+        $self.peek().is_some_and(|token| matches!(token.token_type,$token_type $(if token.lexeme == $lexeme)?))
+    }
+}
+
+macro_rules! second_next_token_matches {
+    ($self: ident, $token_type:pat$(,$lexeme:literal)?) => {
+        $self.peek2().is_some_and(|token| matches!(token.token_type,$token_type $(if token.lexeme == $lexeme)?))
+    }
+}
+
 macro_rules! define_binary_expression_parsers {
     ($($expr_type:ident,$subexpr_type:ident,$operator_token_type:pat),*) => {
         $(
             fn $expr_type(&mut self) -> Result<Expr, ParsingError> {
                 let mut $expr_type = self.$subexpr_type()?;
 
-                while matches!(
-                    self.peek(),
-                    Some(Token {
-                        token_type: $operator_token_type,
-                        ..
-                    })
-                ) {
+                while next_token_matches!(self,$operator_token_type)
+                {
                     let operator = self.advance().unwrap().clone();
                     let $subexpr_type = self.$subexpr_type()?;
                     $expr_type = Expr::Binary(Box::new($expr_type), operator, Box::new($subexpr_type));
@@ -145,14 +152,7 @@ impl Parser {
 
     fn arguments(&mut self) -> Result<Vec<Expr>, ParsingError> {
         let mut arguments = vec![self.expr()?];
-        // TODO: clean up token peeks like this one
-        while matches!(
-            self.peek(),
-            Some(Token {
-                token_type: TokenType::Comma,
-                ..
-            })
-        ) {
+        while next_token_matches!(self, TokenType::Comma) {
             expect!(self, TokenType::Comma);
             arguments.push(self.expr()?);
         }
@@ -161,22 +161,10 @@ impl Parser {
 
     fn function_call(&mut self) -> Result<Expr, ParsingError> {
         let callee = self.primary()?;
-        if matches!(
-            self.peek(),
-            Some(Token {
-                token_type: TokenType::LeftParen,
-                ..
-            })
-        ) {
+        if next_token_matches!(self, TokenType::LeftParen) {
             let lparen = self.advance().unwrap().clone();
             let mut arguments: Vec<Expr> = vec![];
-            if !matches!(
-                self.peek(),
-                Some(Token {
-                    token_type: TokenType::RightParen,
-                    ..
-                })
-            ) {
+            if next_token_matches!(self, TokenType::RightParen) {
                 arguments.append(&mut self.arguments()?);
             }
             expect!(self, TokenType::RightParen);
@@ -187,15 +175,11 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, ParsingError> {
-        match self.peek() {
-            Some(Token {
-                token_type: TokenType::Bang | TokenType::Minus,
-                ..
-            }) => {
-                let operator = self.advance().unwrap().clone();
-                Ok(Expr::Unary(operator, Box::new(self.unary()?)))
-            }
-            _ => self.function_call(),
+        if next_token_matches!(self, TokenType::Bang | TokenType::Minus) {
+            let operator = self.advance().unwrap().clone();
+            Ok(Expr::Unary(operator, Box::new(self.unary()?)))
+        } else {
+            self.function_call()
         }
     }
 
@@ -207,18 +191,12 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
-        let Some(next_token) = self.peek() else {
+        if self.peek().is_none() {
             // TODO: proper and clean error handling with correct line numbers
             return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
-        };
-        if matches!(next_token.token_type, TokenType::Identifier)
-            && matches!(
-                self.peek2(),
-                Some(Token {
-                    token_type: TokenType::Equal,
-                    ..
-                })
-            )
+        }
+        if next_token_matches!(self, TokenType::Identifier)
+            && second_next_token_matches!(self, TokenType::Equal)
         {
             let identifier_token = self.advance().unwrap().clone();
             expect!(self, TokenType::Equal);
@@ -238,6 +216,7 @@ impl Parser {
 
     fn ast(&mut self) -> Result<Ast, ParsingError> {
         let expr = self.expr()?;
+        // TODO: Refactor after error handling cleanup
         match self.peek() {
             Some(Token {
                 token_type, line, ..
@@ -249,32 +228,23 @@ impl Parser {
     }
 
     pub fn statement(&mut self) -> Result<Statement, ParsingError> {
-        let Some(first_token) = self.peek().cloned() else {
+        let Some(Token {
+            token_type, lexeme, ..
+        }) = self.peek().cloned()
+        else {
             return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
         };
-        let return_value = match first_token {
-            Token {
-                token_type: TokenType::Keyword,
-                lexeme,
-                ..
-            } if lexeme == "print" => {
+        let mut expect_semicolon = true;
+        let return_value = match token_type {
+            TokenType::Keyword if lexeme == "print" => {
                 self.advance();
                 let expr = self.expr()?;
                 Ok(Statement::Print(expr))
             }
-            Token {
-                token_type: TokenType::LeftBrace,
-                ..
-            } => {
+            TokenType::LeftBrace => {
                 self.advance();
                 let mut statements = vec![];
-                while !matches!(
-                    self.peek(),
-                    Some(Token {
-                        token_type: TokenType::RightBrace | TokenType::Eof,
-                        ..
-                    })
-                ) {
+                while !next_token_matches!(self, TokenType::RightBrace | TokenType::Eof) {
                     statements.push(self.declaration()?);
                 }
                 if let Some(Token {
@@ -284,36 +254,25 @@ impl Parser {
                 }) = self.peek()
                 {
                     return Err(ParsingError::new(
-                        *line - 1,
+                        *line,
                         ParsingErrorType::UnexpectedEof("}".to_string()),
                     ));
                 }
                 self.advance();
+                expect_semicolon = false;
                 Ok(Statement::Block(statements))
             }
-            Token {
-                token_type: TokenType::Keyword,
-                lexeme,
-                ..
-            } if lexeme == "if" || lexeme == "while" => {
+            TokenType::Keyword if lexeme == "if" || lexeme == "while" => {
                 self.advance();
                 expect!(self, TokenType::LeftParen);
                 let condition = self.expr()?;
                 expect!(self, TokenType::RightParen);
                 let body = self.statement()?;
+                expect_semicolon = false;
                 if lexeme == "if" {
-                    let else_body = if let Some(Token {
-                        token_type: TokenType::Keyword,
-                        lexeme,
-                        ..
-                    }) = self.peek()
-                    {
-                        if lexeme == "else" {
-                            self.advance();
-                            Some(self.statement()?)
-                        } else {
-                            None
-                        }
+                    let else_body = if next_token_matches!(self, TokenType::Keyword, "else") {
+                        expect!(self, TokenType::Keyword, "else");
+                        Some(self.statement()?)
                     } else {
                         None
                     };
@@ -326,20 +285,10 @@ impl Parser {
                     Ok(Statement::While(condition, Box::new(body)))
                 }
             }
-            Token {
-                token_type: TokenType::Keyword,
-                lexeme,
-                ..
-            } if lexeme == "for" => {
+            TokenType::Keyword if lexeme == "for" => {
                 expect!(self, TokenType::Keyword, "for");
                 expect!(self, TokenType::LeftParen);
-                let initializer = if !matches!(
-                    self.peek(),
-                    Some(Token {
-                        token_type: TokenType::Semicolon,
-                        ..
-                    })
-                ) {
+                let initializer = if !next_token_matches!(self, TokenType::Semicolon) {
                     Some(self.declaration()?)
                 } else {
                     expect!(self, TokenType::Semicolon);
@@ -360,31 +309,20 @@ impl Parser {
                         ),
                     ));
                 }
-                let condition = if !matches!(
-                    self.peek(),
-                    Some(Token {
-                        token_type: TokenType::Semicolon,
-                        ..
-                    })
-                ) {
+                let condition = if !next_token_matches!(self, TokenType::Semicolon) {
                     Some(self.expr()?)
                 } else {
                     None
                 };
                 expect!(self, TokenType::Semicolon);
-                let increment = if !matches!(
-                    self.peek(),
-                    Some(Token {
-                        token_type: TokenType::RightParen,
-                        ..
-                    })
-                ) {
+                let increment = if !next_token_matches!(self, TokenType::RightParen) {
                     Some(self.expr()?)
                 } else {
                     None
                 };
                 expect!(self, TokenType::RightParen);
                 let body = self.statement()?;
+                expect_semicolon = false;
                 Ok(Statement::For(
                     initializer.map(Box::new),
                     condition,
@@ -398,23 +336,8 @@ impl Parser {
             }
         };
 
-        if !matches!(
-            return_value,
-            Ok(Statement::Block(_)
-                | Statement::If(_, _, _)
-                | Statement::While(_, _)
-                | Statement::For(_, _, _, _))
-        ) && !matches!(
-            self.advance(),
-            Some(Token {
-                token_type: TokenType::Semicolon,
-                ..
-            }),
-        ) {
-            return Err(ParsingError::new(
-                first_token.line,
-                ParsingErrorType::ExpectedSemicolon,
-            ));
+        if expect_semicolon {
+            expect!(self, TokenType::Semicolon);
         }
         return_value
     }
@@ -441,11 +364,7 @@ impl Parser {
 
         let identifier_token = identifier_token.clone();
 
-        let expression = if let Some(Token {
-            token_type: TokenType::Equal,
-            ..
-        }) = self.peek()
-        {
+        let expression = if next_token_matches!(self, TokenType::Equal) {
             self.advance();
             Some(self.expr()?)
         } else {
@@ -469,26 +388,18 @@ impl Parser {
     }
 
     pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
-        match self.peek() {
-            None => Err(ParsingError::new(0, ParsingErrorType::NothingToParse)),
-            Some(Token {
-                token_type: TokenType::Keyword,
-                lexeme,
-                ..
-            }) if lexeme == "var" => Ok(self.var_declaration()?),
-            _ => Ok(Declaration::Statement(self.statement()?)),
+        if next_token_matches!(self, TokenType::Keyword, "var") {
+            Ok(self.var_declaration()?)
+        } else if self.peek().is_some() {
+            Ok(Declaration::Statement(self.statement()?))
+        } else {
+            todo!("Error handling")
         }
     }
 
     pub fn program(&mut self) -> Result<Program, ParsingError> {
         let mut declarations = Vec::new();
-        while !matches!(
-            self.peek(),
-            Some(Token {
-                token_type: TokenType::Eof,
-                ..
-            })
-        ) {
+        while !next_token_matches!(self, TokenType::Eof) {
             declarations.push(self.declaration()?);
         }
         Ok(declarations)
@@ -505,16 +416,7 @@ impl Parser {
     // TODO: refactor this into the macro for binaries?
     fn logic_or(&mut self) -> Result<Expr, ParsingError> {
         let mut logic_or = self.logic_and()?;
-        while matches!(
-            self.peek(),
-            Some(
-                Token {
-                token_type: TokenType::Keyword,
-                lexeme,
-                ..
-            }
-            ) if lexeme == "or",
-        ) {
+        while next_token_matches!(self, TokenType::Keyword, "or") {
             let operator = self.advance().unwrap().clone();
             let logic_and = self.logic_and()?;
             logic_or = Expr::Logical(Box::new(logic_or), operator, Box::new(logic_and));
@@ -524,16 +426,7 @@ impl Parser {
 
     fn logic_and(&mut self) -> Result<Expr, ParsingError> {
         let mut logic_and = self.equality()?;
-        while matches!(
-            self.peek(),
-            Some(
-                Token {
-                token_type: TokenType::Keyword,
-                lexeme,
-                ..
-            }
-            ) if lexeme == "and",
-        ) {
+        while next_token_matches!(self, TokenType::Keyword, "and") {
             let operator = self.advance().unwrap().clone();
             let equality = self.equality()?;
             logic_and = Expr::Logical(Box::new(logic_and), operator, Box::new(equality));
