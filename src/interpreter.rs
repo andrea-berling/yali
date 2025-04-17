@@ -1,18 +1,23 @@
 use std::{collections::VecDeque, fmt::Display};
 
+use thiserror::Error;
+
 use crate::{
     eval::{eval_expr, EvalError, EvalResult},
     parser::{Declaration, Expr, LiteralExpr, Program, Statement},
 };
 
-#[derive(Debug)]
+// TODO: actually print out Runtime errors
+#[derive(Debug, Error)]
 pub enum RuntimeErrorType {
+    #[error("Error during evaluation")]
     EvalError,
+    #[error("Undefined variable: {0}")]
     UndefinedVariable(String),
-    ConditionMustBeBoolean,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("[line {line}] {error}")]
 pub struct RuntimeError {
     pub line: usize,
     pub error: RuntimeErrorType,
@@ -274,6 +279,7 @@ impl Interpreter {
         }
     }
 
+    // TODO: clean up and turn into "side_effects"
     fn maybe_assign(&mut self, eval_result: &EvalResult) -> Result<(), RuntimeError> {
         if let EvalResult::Assign(var_token, eval_result) = eval_result {
             self.state.environment.set(

@@ -145,6 +145,7 @@ impl Parser {
 
     fn arguments(&mut self) -> Result<Vec<Expr>, ParsingError> {
         let mut arguments = vec![self.expr()?];
+        // TODO: clean up token peeks like this one
         while matches!(
             self.peek(),
             Some(Token {
@@ -179,11 +180,7 @@ impl Parser {
                 arguments.append(&mut self.arguments()?);
             }
             expect!(self, TokenType::RightParen);
-            Ok(Expr::FnCall(
-                Box::new(callee),
-                lparen,
-                arguments.into_iter().map(Box::new).collect(),
-            ))
+            Ok(Expr::FnCall(Box::new(callee), lparen, arguments))
         } else {
             Ok(callee)
         }
@@ -211,6 +208,7 @@ impl Parser {
 
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
         let Some(next_token) = self.peek() else {
+            // TODO: proper and clean error handling with correct line numbers
             return Err(ParsingError::new(0, ParsingErrorType::NothingToParse));
         };
         if matches!(next_token.token_type, TokenType::Identifier)
@@ -564,6 +562,7 @@ pub enum Statement {
     Block(Vec<Declaration>),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
     While(Expr, Box<Statement>),
+    // TODO: remove this and just use While at the syntax level
     For(
         Option<Box<Declaration>>,
         Option<Expr>,
@@ -581,7 +580,7 @@ pub enum Expr {
     Var(Token),
     Assign(Token, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
-    FnCall(Box<Expr>, Token, Vec<Box<Expr>>),
+    FnCall(Box<Expr>, Token, Vec<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -598,22 +597,16 @@ pub enum ParsingErrorType {
     UnparsedTokens,
     #[error("Nothing to parse")]
     NothingToParse,
-    #[error("Token type mismatch")]
-    TokenTypeMismatch,
     #[error("Error at '{0}': Expect expression")]
     UnexpectedToken(String),
     #[error("Unbalanced grouping")]
     UnbalancedGrouping,
-    #[error("Invalid expression")]
-    InvalidExpression,
     #[error("Expected semicolon")]
     ExpectedSemicolon,
     #[error("Expected 'var'")]
     ExpectedVar,
     #[error("Expected identifier")]
     ExpectedIdentifier,
-    #[error("Expected equal sign")]
-    ExpectedEqualSign,
     #[error("Error at end: Expect '{0}'")]
     UnexpectedEof(String),
 }
@@ -648,9 +641,9 @@ pub trait Visit {
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
             Expr::Var(_) => todo!(),
-            Expr::Assign(token, expr) => todo!(),
-            Expr::Logical(expr, token, expr1) => todo!(),
-            Expr::FnCall(expr, token, vec) => todo!(),
+            Expr::Assign(_token, _expr) => todo!(),
+            Expr::Logical(_expr, _token, _expr1) => todo!(),
+            Expr::FnCall(_expr, _token, _vec) => todo!(),
         }
     }
 
@@ -660,7 +653,7 @@ pub trait Visit {
         }
     }
 
-    fn visit_literal(&self, literal: Literal) {}
+    fn visit_literal(&self, _: Literal) {}
 
     fn visit_grouping(&self, expr: Expr) {
         self.visit_expr(expr);
@@ -723,7 +716,7 @@ impl Visit for AstPrinter {
                 print!("{}", token.lexeme);
                 self.visit_expr(*expr2);
             }
-            Expr::FnCall(expr, token, vec) => todo!(),
+            Expr::FnCall(_expr, _token, _vec) => todo!(),
         }
     }
 }

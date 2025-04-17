@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::interpreter::{Environment, Value};
 use crate::lexer::{Token, TokenType};
-use crate::parser::{Ast, Expr, Program, Statement};
+use crate::parser::{Ast, Expr};
 
 #[derive(Debug)]
 pub enum EvalResult {
@@ -18,12 +18,8 @@ pub enum EvalResult {
 
 #[derive(Debug, Error)]
 pub enum EvalErrorType {
-    #[error("Invalid operand")]
-    IvalidOperand,
     #[error("Invalid operator")]
     IvalidOperator,
-    #[error("Unexpected token")]
-    UnexpectedToken,
     #[error("Operand must be a number.")]
     OperandMustBeANumber,
     #[error("Operands must be numbers.")]

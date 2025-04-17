@@ -68,9 +68,10 @@ fn main() {
                 },
                 "run" => match parser.parse_program() {
                     Ok(program) => {
-                        if Interpreter::new(program.clone()).run().is_err() {
+                        if let Err(err) = Interpreter::new(program.clone()).run() {
+                            eprintln!("{err}");
                             exit_code = 70;
-                        };
+                        }
                     }
                     Err(parsing_error) => {
                         eprintln!("{parsing_error}");
