@@ -164,7 +164,7 @@ impl Parser {
         if next_token_matches!(self, TokenType::LeftParen) {
             let lparen = self.advance().unwrap().clone();
             let mut arguments: Vec<Expr> = vec![];
-            if next_token_matches!(self, TokenType::RightParen) {
+            if !next_token_matches!(self, TokenType::RightParen) {
                 arguments.append(&mut self.arguments()?);
             }
             expect!(self, TokenType::RightParen);
@@ -288,26 +288,25 @@ impl Parser {
             TokenType::Keyword if lexeme == "for" => {
                 expect!(self, TokenType::Keyword, "for");
                 expect!(self, TokenType::LeftParen);
-                let initializer = if !next_token_matches!(self, TokenType::Semicolon) {
-                    Some(self.declaration()?)
+                let mut equivalent_statements = vec![];
+                if !next_token_matches!(self, TokenType::Semicolon) {
+                    let initializer = self.declaration()?;
+                    if !matches!(
+                        initializer,
+                        Declaration::Var(_, _) | Declaration::Statement(Statement::Expr(_)),
+                    ) {
+                        return Err(ParsingError::new(
+                            self.peek().map(|t| t.line).unwrap_or(0),
+                            ParsingErrorType::UnexpectedToken(
+                                self.peek()
+                                    .map(|t| t.lexeme.clone())
+                                    .unwrap_or("".to_string()),
+                            ),
+                        ));
+                    }
+                    equivalent_statements.push(initializer);
                 } else {
                     expect!(self, TokenType::Semicolon);
-                    None
-                };
-                if !matches!(
-                    initializer,
-                    None | Some(
-                        Declaration::Var(_, _) | Declaration::Statement(Statement::Expr(_))
-                    ),
-                ) {
-                    return Err(ParsingError::new(
-                        self.peek().map(|t| t.line).unwrap_or(0),
-                        ParsingErrorType::UnexpectedToken(
-                            self.peek()
-                                .map(|t| t.lexeme.clone())
-                                .unwrap_or("".to_string()),
-                        ),
-                    ));
                 }
                 let condition = if !next_token_matches!(self, TokenType::Semicolon) {
                     Some(self.expr()?)
@@ -321,14 +320,20 @@ impl Parser {
                     None
                 };
                 expect!(self, TokenType::RightParen);
-                let body = self.statement()?;
+                let mut parsed_body = self.statement()?;
                 expect_semicolon = false;
-                Ok(Statement::For(
-                    initializer.map(Box::new),
-                    condition,
-                    increment,
-                    Box::new(body),
-                ))
+                if let Some(increment) = increment {
+                    parsed_body = Statement::Block(vec![
+                        Declaration::Statement(parsed_body),
+                        Declaration::Statement(Statement::Expr(increment)),
+                    ]);
+                }
+                equivalent_statements.push(Declaration::Statement(Statement::While(
+                    condition.unwrap_or(Expr::Literal(LiteralExpr::True)),
+                    Box::new(parsed_body),
+                )));
+
+                Ok(Statement::Block(equivalent_statements))
             }
             _ => {
                 let expr = self.expr()?;
@@ -455,13 +460,6 @@ pub enum Statement {
     Block(Vec<Declaration>),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
     While(Expr, Box<Statement>),
-    // TODO: remove this and just use While at the syntax level
-    For(
-        Option<Box<Declaration>>,
-        Option<Expr>,
-        Option<Expr>,
-        Box<Statement>,
-    ),
 }
 
 #[derive(Clone, Debug)]
