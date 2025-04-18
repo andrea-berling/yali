@@ -7,26 +7,10 @@ use crate::{
     parser::{Declaration, Program, Statement},
 };
 
-// TODO: actually print out Runtime errors
 #[derive(Debug, Error)]
-pub enum RuntimeErrorType {
-    #[error("Error during evaluation")]
-    EvalError,
-    #[error("Undefined variable: {0}")]
-    UndefinedVariable(String),
-}
-
-#[derive(Debug, Error)]
-#[error("[line {line}] {error}")]
-pub struct RuntimeError {
-    pub line: usize,
-    pub error: RuntimeErrorType,
-}
-
-impl RuntimeError {
-    pub fn new(line: usize, error: RuntimeErrorType) -> Self {
-        Self { line, error }
-    }
+pub enum RuntimeError {
+    #[error(transparent)]
+    EvalError(#[from] EvalError),
 }
 
 #[derive(Clone, Debug)]
@@ -88,28 +72,20 @@ impl Environment {
         self.0.pop_front();
     }
 
-    pub fn set(
-        &mut self,
-        name: String,
-        value: Option<Value>,
-        new: bool,
-    ) -> Result<(), RuntimeError> {
+    pub fn set(&mut self, name: &str, value: Option<Value>, new: bool) -> bool {
         let latest_scope = self
             .0
             .front_mut()
             .expect("Environment should have at least one scope");
         if new {
-            latest_scope.insert(name, value);
-            Ok(())
+            latest_scope.insert(name.to_string(), value);
+            true
         } else {
-            let Some(old_value) = self.get_mut(&name) else {
-                return Err(RuntimeError::new(
-                    0,
-                    RuntimeErrorType::UndefinedVariable(name.clone()),
-                ));
+            let Some(old_value) = self.get_mut(name) else {
+                return false;
             };
             *old_value = value;
-            Ok(())
+            true
         }
     }
 }
@@ -126,31 +102,17 @@ impl Interpreter {
 
     pub fn statement(&mut self, statement: &Statement) -> Result<(), RuntimeError> {
         match statement {
-            Statement::Expr(expr) => match eval_expr(expr, &self.state.environment) {
-                Ok(eval_result) => {
-                    self.maybe_assign(&eval_result)?;
-                    Ok(())
+            Statement::Expr(expr) => self.maybe_assign(&eval_expr(expr, &self.state.environment)?),
+            Statement::Print(expr) => {
+                let eval_result = eval_expr(expr, &self.state.environment)?;
+                self.maybe_assign(&eval_result)?;
+                if let Some(value) = Self::eval_result_to_value(&eval_result) {
+                    println!("{value}");
+                } else {
+                    println!("nil")
                 }
-                Err(err) => {
-                    eprintln!("{}\n[line {}]", err.error, err.line);
-                    Err(RuntimeError::new(err.line, RuntimeErrorType::EvalError))
-                }
-            },
-            Statement::Print(expr) => match eval_expr(expr, &self.state.environment) {
-                Err(EvalError { line, error }) => {
-                    eprintln!("{}\n[line {}]", error, line);
-                    Err(RuntimeError::new(line, RuntimeErrorType::EvalError))
-                }
-                Ok(eval_result) => {
-                    self.maybe_assign(&eval_result)?;
-                    if let Some(value) = Self::eval_result_to_value(&eval_result) {
-                        println!("{value}");
-                    } else {
-                        println!("nil")
-                    }
-                    Ok(())
-                }
-            },
+                Ok(())
+            }
             Statement::Block(declarations) => {
                 self.state.environment.add_scope();
                 for declaration in declarations.iter() {
@@ -160,10 +122,7 @@ impl Interpreter {
                 Ok(())
             }
             Statement::If(condition, if_statement, else_statement) => {
-                let eval_result = eval_expr(condition, &self.state.environment).map_err(|err| {
-                    eprintln!("{}\n[line {}]", err.error, err.line);
-                    RuntimeError::new(err.line, RuntimeErrorType::EvalError)
-                })?;
+                let eval_result = eval_expr(condition, &self.state.environment)?;
                 self.maybe_assign(&eval_result)?;
                 let condition = Self::eval_result_to_value(&eval_result);
                 if condition.is_some_and(|condition| !matches!(condition, Value::Boolean(false))) {
@@ -174,21 +133,15 @@ impl Interpreter {
                 Ok(())
             }
             Statement::While(while_condition, statement) => {
-                let eval_result =
-                    eval_expr(while_condition, &self.state.environment).map_err(|err| {
-                        eprintln!("{}\n[line {}]", err.error, err.line);
-                        RuntimeError::new(err.line, RuntimeErrorType::EvalError)
-                    })?;
+                let eval_result = eval_expr(while_condition, &self.state.environment)?;
                 let mut condition = Self::eval_result_to_value(&eval_result);
                 while condition.is_some_and(|condition| !matches!(condition, Value::Boolean(false)))
                 {
                     self.statement(statement)?;
-                    condition = Self::eval_result_to_value(
-                        &eval_expr(while_condition, &self.state.environment).map_err(|err| {
-                            eprintln!("{}\n[line {}]", err.error, err.line);
-                            RuntimeError::new(err.line, RuntimeErrorType::EvalError)
-                        })?,
-                    );
+                    condition = Self::eval_result_to_value(&eval_expr(
+                        while_condition,
+                        &self.state.environment,
+                    )?);
                 }
                 Ok(())
             }
@@ -200,22 +153,14 @@ impl Interpreter {
             Declaration::Var(ident_token, expr) => {
                 match expr {
                     Some(expr) => {
-                        let value_to_insert = Self::eval_result_to_value(
-                            &eval_expr(expr, &self.state.environment).map_err(|err| {
-                                eprintln!("{}\n[line {}]", err.error, err.line);
-                                RuntimeError::new(err.line, RuntimeErrorType::EvalError)
-                            })?,
-                        );
-                        self.state.environment.set(
-                            ident_token.lexeme.clone(),
-                            value_to_insert,
-                            true,
-                        )?;
-                    }
-                    None => {
+                        let value_to_insert =
+                            Self::eval_result_to_value(&eval_expr(expr, &self.state.environment)?);
                         self.state
                             .environment
-                            .set(ident_token.lexeme.clone(), None, true)?;
+                            .set(&ident_token.lexeme, value_to_insert, true);
+                    }
+                    None => {
+                        self.state.environment.set(&ident_token.lexeme, None, true);
                     }
                 }
                 Ok(())
@@ -261,10 +206,10 @@ impl Interpreter {
     fn maybe_assign(&mut self, eval_result: &EvalResult) -> Result<(), RuntimeError> {
         if let EvalResult::Assign(var_token, eval_result) = eval_result {
             self.state.environment.set(
-                var_token.lexeme.clone(),
+                &var_token.lexeme,
                 Self::eval_result_to_value(eval_result),
                 false,
-            )?;
+            );
             return self.maybe_assign(eval_result);
         } else if let EvalResult::Logical(token, eval_result1, eval_result2) = eval_result {
             match (

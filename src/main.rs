@@ -59,7 +59,7 @@ fn main() {
                         Ok(val) => println!("{val}"),
                         Err(err) => {
                             exit_code = 70;
-                            eprintln!("{}\n[line {}]", err.error, err.line);
+                            eprintln!("{err}");
                         }
                     },
                     Err(parsing_error) => {

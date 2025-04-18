@@ -20,26 +20,30 @@ pub enum EvalResult {
 pub enum EvalErrorType {
     #[error("Invalid operator")]
     IvalidOperator,
-    #[error("Operand must be a number.")]
+    #[error("Operand must be a number")]
     OperandMustBeANumber,
-    #[error("Operands must be numbers.")]
+    #[error("Operands must be numbers")]
     OperandsMustBeNumbers,
-    #[error("Operands must be two numbers or two strings.")]
+    #[error("Operands must be two numbers or two strings")]
     OperandsMustBeTwoNumbersOrTwoStrings,
-    #[error("Undefined variable '{0}'.")]
-    UndefinedVariable(String),
+    #[error("Undefined variable")]
+    UndefinedVariable,
 }
 
-#[derive(Debug)]
+use EvalErrorType::*;
+
+#[derive(Error, Debug)]
+#[error("Error at {}: {error}.\n[line {}]",if !token.lexeme.is_empty() {format!("'{}'",&token.lexeme)} else {"end".to_string()}, token.line)]
 pub struct EvalError {
-    pub line: usize,
-    pub error: EvalErrorType,
+    token: Token,
+    error: EvalErrorType,
 }
 
-impl EvalError {
-    pub fn new(line: usize, error: EvalErrorType) -> Self {
-        Self { line, error }
-    }
+fn eval_error<T>(token: &Token, error: EvalErrorType) -> Result<T, EvalError> {
+    Err(EvalError {
+        token: token.clone(),
+        error,
+    })
 }
 
 impl Display for EvalResult {
@@ -73,17 +77,14 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let EvalResult::Number(n) = eval_expr(expr, environment)? {
                     Ok(EvalResult::Number(-n))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandMustBeANumber,
-                    ))
+                    eval_error(token, OperandMustBeANumber)
                 }
             }
             TokenType::Bang => match eval_expr(expr, environment)? {
                 EvalResult::Bool(false) | EvalResult::Nil => Ok(EvalResult::Bool(true)),
                 _ => Ok(EvalResult::Bool(false)),
             },
-            _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
+            _ => eval_error(token, IvalidOperator),
         },
         Expr::Binary(expr, token, expr1) => match &token.token_type {
             TokenType::Plus => {
@@ -94,10 +95,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                     (EvalResult::String(l), EvalResult::String(r)) => {
                         Ok(EvalResult::String(format!("{}{}", l, r)))
                     }
-                    _ => Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeTwoNumbersOrTwoStrings,
-                    )),
+                    _ => eval_error(token, OperandsMustBeTwoNumbersOrTwoStrings),
                 }
             }
             TokenType::Minus => {
@@ -106,10 +104,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l - r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeTwoNumbersOrTwoStrings,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
 
@@ -119,10 +114,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Number(l * r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeNumbers,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::Slash => {
@@ -130,14 +122,11 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 let right = eval_expr(expr1, environment)?;
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     if r == 0.0 {
-                        return Err(EvalError::new(token.line, EvalErrorType::IvalidOperator));
+                        return eval_error(token, IvalidOperator);
                     }
                     Ok(EvalResult::Number(l / r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeNumbers,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::EqualEqual => {
@@ -166,10 +155,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l > r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeNumbers,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::GreaterEqual => {
@@ -178,10 +164,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l >= r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeNumbers,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::Less => {
@@ -190,10 +173,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l < r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeNumbers,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::LessEqual => {
@@ -202,13 +182,10 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
                     Ok(EvalResult::Bool(l <= r))
                 } else {
-                    Err(EvalError::new(
-                        token.line,
-                        EvalErrorType::OperandsMustBeNumbers,
-                    ))
+                    eval_error(token, OperandsMustBeNumbers)
                 }
             }
-            _ => Err(EvalError::new(token.line, EvalErrorType::IvalidOperator)),
+            _ => eval_error(token, IvalidOperator),
         },
         Expr::Grouping(expr) => eval_expr(expr, environment),
         Expr::Var(token) => {
@@ -220,14 +197,14 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                     None => Ok(EvalResult::Nil),
                 }
             } else {
-                Err(EvalError::new(
-                    token.line,
-                    EvalErrorType::UndefinedVariable(token.lexeme.clone()),
-                ))
+                eval_error(token, UndefinedVariable)
             }
         }
         Expr::Assign(token, expr) => {
             let result = eval_expr(expr, environment)?;
+            if environment.get(&token.lexeme).is_none() {
+                return eval_error(token, UndefinedVariable);
+            }
             Ok(EvalResult::Assign(token.clone(), Box::new(result)))
         }
         Expr::Logical(expr1, operator, expr2) => {
