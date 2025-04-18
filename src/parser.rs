@@ -21,16 +21,22 @@ macro_rules! second_next_token_matches {
 }
 
 macro_rules! define_binary_expression_parsers {
-    ($($expr_type:ident,$subexpr_type:ident,$operator_token_type:pat),*) => {
+    ($($expr_type:ident = chain of $subexpr_type:ident joined by $operator_token_type:pat$(=$lexeme:literal)?),*) => {
         $(
             fn $expr_type(&mut self) -> Result<Expr, ParsingError> {
                 let mut $expr_type = self.$subexpr_type()?;
 
-                while next_token_matches!(self,$operator_token_type)
+                while next_token_matches!(self,$operator_token_type $(,$lexeme)?)
                 {
                     let operator = self.advance().unwrap().clone();
                     let $subexpr_type = self.$subexpr_type()?;
-                    $expr_type = Expr::Binary(Box::new($expr_type), operator, Box::new($subexpr_type));
+                    let type_constructor = if matches!(TT::Keyword, $operator_token_type) {
+                        Expr::Logical
+                    }
+                    else {
+                        Expr::Binary
+                    };
+                    $expr_type = type_constructor(Box::new($expr_type), operator, Box::new($subexpr_type));
                 }
                 Ok($expr_type)
             }
@@ -181,10 +187,12 @@ impl Parser {
     }
 
     define_binary_expression_parsers! {
-        equality,comparison,TT::BangEqual | TT::EqualEqual,
-        comparison,term,TT::Greater | TT::GreaterEqual | TT::Less | TT::LessEqual,
-        term,factor,TT::Minus | TT::Plus,
-        factor,unary,TT::Slash | TT::Star
+        logic_or = chain of logic_and joined by TT::Keyword = "or",
+        logic_and = chain of equality joined by TT::Keyword = "and",
+        equality = chain of comparison joined by TT::BangEqual | TT::EqualEqual,
+        comparison = chain of term joined by TT::Greater | TT::GreaterEqual | TT::Less | TT::LessEqual,
+        term = chain of factor joined by TT::Minus | TT::Plus,
+        factor = chain of unary joined by TT::Slash | TT::Star
     }
 
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
@@ -385,27 +393,6 @@ impl Parser {
 
     pub fn parse_ast(&mut self) -> Result<Ast, ParsingError> {
         self.ast()
-    }
-
-    // TODO: refactor this into the macro for binaries?
-    fn logic_or(&mut self) -> Result<Expr, ParsingError> {
-        let mut logic_or = self.logic_and()?;
-        while next_token_matches!(self, TT::Keyword, "or") {
-            let operator = self.advance().unwrap().clone();
-            let logic_and = self.logic_and()?;
-            logic_or = Expr::Logical(Box::new(logic_or), operator, Box::new(logic_and));
-        }
-        Ok(logic_or)
-    }
-
-    fn logic_and(&mut self) -> Result<Expr, ParsingError> {
-        let mut logic_and = self.equality()?;
-        while next_token_matches!(self, TT::Keyword, "and") {
-            let operator = self.advance().unwrap().clone();
-            let equality = self.equality()?;
-            logic_and = Expr::Logical(Box::new(logic_and), operator, Box::new(equality));
-        }
-        Ok(logic_and)
     }
 }
 
