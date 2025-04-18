@@ -8,18 +8,16 @@ pub const KEYWORDS: [&str; 16] = [
 ];
 
 macro_rules! define_token_types {
-    ( $( $single_char_variant:ident, $char:literal ),* $(,)?, $(- $($other_variant:ident),*)? $(,)?, ) => {
+    ( $( $token_type:ident, $representation:literal ),*) => {
         #[derive(Debug, PartialEq,Clone)]
         pub enum TokenType {
-            $( $single_char_variant ),*,
-            $($( $other_variant ),*)?
+            $( $token_type ),*
         }
 
         impl std::fmt::Display for TokenType {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
-                    $( TokenType::$single_char_variant => write!(f, "{}", convert_ascii_case!(shouty_snake,stringify!($single_char_variant))), )*
-                    $($( TokenType::$other_variant => write!(f, "{}", convert_ascii_case!(shouty_snake,stringify!($other_variant))), )*)?
+                    $( TokenType::$token_type => write!(f, "{}", if f.alternate() { convert_ascii_case!(shouty_snake,stringify!($token_type)) } else { $representation }), )*
                 }
             }
         }
@@ -28,11 +26,11 @@ macro_rules! define_token_types {
             UnrecognizedCharacter,
         }
 
-        impl TryFrom<char> for TokenType {
+        impl TryFrom<&str> for TokenType {
             type Error = TokenConversionError;
-            fn try_from(value: char) -> Result<Self, Self::Error> {
+            fn try_from(value: &str) -> Result<Self, Self::Error> {
                 match value {
-                    $( $char => Ok(TokenType::$single_char_variant), )*
+                    $( $representation => Ok(TokenType::$token_type), )*
                     _ => Err(TokenConversionError::UnrecognizedCharacter),
                 }
             }
@@ -41,31 +39,30 @@ macro_rules! define_token_types {
 }
 
 define_token_types! {
-    LeftParen, '(',
-    RightParen, ')',
-    LeftBrace, '{',
-    RightBrace, '}',
-    Comma, ',',
-    Dot, '.',
-    Minus, '-',
-    Plus, '+',
-    Semicolon, ';',
-    Slash, '/',
-    Star, '*',
-    Equal, '=',
-    Bang,'!',
-    Less, '<',
-    Greater, '>',
-    -
-    EqualEqual,
-    BangEqual,
-    LessEqual,
-    GreaterEqual,
-    String,
-    Number,
-    Identifier,
-    Keyword,
-    Eof,
+    LeftParen, "(",
+    RightParen, ")",
+    LeftBrace, "{",
+    RightBrace, "}",
+    Comma, ",",
+    Dot, ".",
+    Minus, "-",
+    Plus, "+",
+    Semicolon, ";",
+    Slash, "/",
+    Star, "*",
+    Equal, "=",
+    Bang,"!",
+    Less, "<",
+    Greater, ">",
+    EqualEqual, "==",
+    BangEqual, "!=",
+    LessEqual, "<=",
+    GreaterEqual, ">=",
+    String, "STRING",
+    Number, "NUMBER",
+    Identifier, "IDENTIFIER",
+    Keyword, "KEYWORD",
+    Eof, "EOF"
 }
 
 #[derive(Clone, Debug)]
@@ -122,7 +119,7 @@ impl Display for Token {
             if let TokenType::Keyword = &self.token_type {
                 self.lexeme.to_uppercase()
             } else {
-                self.token_type.to_string()
+                format!("{:#}", self.token_type)
             },
             self.lexeme,
             match self.value {
@@ -133,7 +130,8 @@ impl Display for Token {
     }
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
+#[error("[line {line}] Error: {error}")]
 pub struct ScanningError {
     pub line: usize,
     pub error: ScanningErrorType,
@@ -235,7 +233,7 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
             continue;
         }
 
-        match TokenType::try_from(c) {
+        match TokenType::try_from(c.to_string().as_str()) {
             Ok(token_type) => tokens.push(Token {
                 token_type,
                 lexeme: c.to_string(),
@@ -254,7 +252,11 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
         TokenType::Eof,
         String::new(),
         None,
-        current_line,
+        if let Some(token) = tokens.last() {
+            token.line
+        } else {
+            current_line
+        },
     ));
     (tokens, errors)
 }

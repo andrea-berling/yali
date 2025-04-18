@@ -30,14 +30,15 @@ fn main() {
     // Uncomment this block to pass the first stage
     let (tokens, scanning_errors) = tokenize(&file_contents);
 
+    if !scanning_errors.is_empty() {
+        exit_code = 65;
+        for err in scanning_errors {
+            eprintln!("{err}");
+        }
+    }
+
     match command.as_str() {
         "tokenize" => {
-            if !scanning_errors.is_empty() {
-                exit_code = 65;
-                for err in scanning_errors {
-                    eprintln!("[line {}] Error: {}", err.line, err.error);
-                }
-            }
             for token in tokens {
                 println!("{}", token);
             }

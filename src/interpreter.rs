@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     eval::{eval_expr, EvalError, EvalResult},
-    parser::{Declaration, Expr, LiteralExpr, Program, Statement},
+    parser::{Declaration, Program, Statement},
 };
 
 // TODO: actually print out Runtime errors
