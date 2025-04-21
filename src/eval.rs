@@ -191,10 +191,10 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
         Expr::Var(token) => {
             if let Some(value) = environment.get(&token.lexeme) {
                 match value {
-                    Some(Value::Number(n)) => Ok(EvalResult::Number(*n)),
-                    Some(Value::String(s)) => Ok(EvalResult::String(s.clone())),
-                    Some(Value::Boolean(b)) => Ok(EvalResult::Bool(*b)),
-                    None => Ok(EvalResult::Nil),
+                    Value::Number(n) => Ok(EvalResult::Number(*n)),
+                    Value::String(s) => Ok(EvalResult::String(s.clone())),
+                    Value::Boolean(b) => Ok(EvalResult::Bool(*b)),
+                    Value::Nil => Ok(EvalResult::Nil),
                 }
             } else {
                 eval_error(token, UndefinedVariable)

@@ -3,8 +3,8 @@ use std::{collections::VecDeque, fmt::Display};
 use thiserror::Error;
 
 use crate::{
-    eval::{eval_expr, EvalError, EvalResult},
-    parser::{Declaration, Program, Statement},
+    eval::{EvalError, EvalResult},
+    parser::{Declaration, Expr, Program, Statement},
 };
 
 #[derive(Debug, Error)]
@@ -18,6 +18,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
+    Nil,
 }
 
 impl Display for Value {
@@ -26,11 +27,33 @@ impl Display for Value {
             Value::Number(n) => write!(f, "{n}"),
             Value::String(s) => write!(f, "{s}"),
             Value::Boolean(b) => write!(f, "{b}"),
+            Value::Nil => write!(f, "nil"),
         }
     }
 }
 
-pub struct Environment(VecDeque<std::collections::HashMap<String, Option<Value>>>);
+impl From<&EvalResult> for Value {
+    fn from(eval_result: &EvalResult) -> Self {
+        match eval_result {
+            EvalResult::Number(n) => Value::Number(*n),
+            EvalResult::String(s) => Value::String(s.clone()),
+            EvalResult::Bool(b) => Value::Boolean(*b),
+            EvalResult::Nil => Value::Nil,
+            EvalResult::Assign(_, eval_result) => Self::from(eval_result.as_ref()),
+            EvalResult::Logical(token, eval_result1, eval_result2) => {
+                match (Self::from(eval_result1.as_ref()), token.lexeme.as_str()) {
+                    (Value::Nil | Value::Boolean(false), "or") => Self::from(eval_result2.as_ref()),
+                    (result1, "or") => result1,
+                    (result1 @ (Value::Nil | Value::Boolean(false)), "and") => result1,
+                    (_, "and") => Self::from(eval_result2.as_ref()),
+                    _ => todo!("Shouldn't happen"),
+                }
+            }
+        }
+    }
+}
+
+pub struct Environment(VecDeque<std::collections::HashMap<String, Value>>);
 
 pub struct State {
     pub environment: Environment,
@@ -46,7 +69,7 @@ impl Environment {
         Self(VecDeque::from(vec![std::collections::HashMap::new()]))
     }
 
-    pub fn get(&self, name: &str) -> Option<&Option<Value>> {
+    pub fn get(&self, name: &str) -> Option<&Value> {
         for scope in self.0.iter() {
             if let Some(value) = scope.get(name) {
                 return Some(value);
@@ -55,7 +78,7 @@ impl Environment {
         None
     }
 
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut Option<Value>> {
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut Value> {
         for scope in self.0.iter_mut() {
             if let Some(value) = scope.get_mut(name) {
                 return Some(value);
@@ -72,7 +95,7 @@ impl Environment {
         self.0.pop_front();
     }
 
-    pub fn set(&mut self, name: &str, value: Option<Value>, new: bool) -> bool {
+    pub fn set(&mut self, name: &str, value: Value, new: bool) -> bool {
         let latest_scope = self
             .0
             .front_mut()
@@ -100,17 +123,17 @@ impl Interpreter {
         }
     }
 
+    fn eval_expr(&mut self, expr: &Expr) -> Result<EvalResult, RuntimeError> {
+        let eval_result = crate::eval::eval_expr(expr, &self.state.environment)?;
+        self.handle_side_effects(&eval_result)?;
+        Ok(eval_result)
+    }
+
     pub fn statement(&mut self, statement: &Statement) -> Result<(), RuntimeError> {
         match statement {
-            Statement::Expr(expr) => self.maybe_assign(&eval_expr(expr, &self.state.environment)?),
+            Statement::Expr(expr) => self.eval_expr(expr).map(|_| ()),
             Statement::Print(expr) => {
-                let eval_result = eval_expr(expr, &self.state.environment)?;
-                self.maybe_assign(&eval_result)?;
-                if let Some(value) = Self::eval_result_to_value(&eval_result) {
-                    println!("{value}");
-                } else {
-                    println!("nil")
-                }
+                println!("{}", Value::from(&self.eval_expr(expr)?));
                 Ok(())
             }
             Statement::Block(declarations) => {
@@ -122,10 +145,8 @@ impl Interpreter {
                 Ok(())
             }
             Statement::If(condition, if_statement, else_statement) => {
-                let eval_result = eval_expr(condition, &self.state.environment)?;
-                self.maybe_assign(&eval_result)?;
-                let condition = Self::eval_result_to_value(&eval_result);
-                if condition.is_some_and(|condition| !matches!(condition, Value::Boolean(false))) {
+                let condition = Value::from(&self.eval_expr(condition)?);
+                if !matches!(condition, Value::Boolean(false) | Value::Nil) {
                     self.statement(if_statement)?;
                 } else if let Some(else_statement) = else_statement {
                     self.statement(else_statement)?;
@@ -133,15 +154,10 @@ impl Interpreter {
                 Ok(())
             }
             Statement::While(while_condition, statement) => {
-                let eval_result = eval_expr(while_condition, &self.state.environment)?;
-                let mut condition = Self::eval_result_to_value(&eval_result);
-                while condition.is_some_and(|condition| !matches!(condition, Value::Boolean(false)))
-                {
+                let mut condition = Value::from(&self.eval_expr(while_condition)?);
+                while !matches!(condition, Value::Boolean(false) | Value::Nil) {
                     self.statement(statement)?;
-                    condition = Self::eval_result_to_value(&eval_expr(
-                        while_condition,
-                        &self.state.environment,
-                    )?);
+                    condition = Value::from(&self.eval_expr(while_condition)?);
                 }
                 Ok(())
             }
@@ -153,14 +169,15 @@ impl Interpreter {
             Declaration::Var(ident_token, expr) => {
                 match expr {
                     Some(expr) => {
-                        let value_to_insert =
-                            Self::eval_result_to_value(&eval_expr(expr, &self.state.environment)?);
+                        let value_to_insert = Value::from(&self.eval_expr(expr)?);
                         self.state
                             .environment
                             .set(&ident_token.lexeme, value_to_insert, true);
                     }
                     None => {
-                        self.state.environment.set(&ident_token.lexeme, None, true);
+                        self.state
+                            .environment
+                            .set(&ident_token.lexeme, Value::Nil, true);
                     }
                 }
                 Ok(())
@@ -180,55 +197,27 @@ impl Interpreter {
         Ok(())
     }
 
-    fn eval_result_to_value(eval_result: &EvalResult) -> Option<Value> {
-        match eval_result {
-            EvalResult::Number(n) => Some(Value::Number(*n)),
-            EvalResult::String(s) => Some(Value::String(s.clone())),
-            EvalResult::Bool(b) => Some(Value::Boolean(*b)),
-            EvalResult::Nil => None,
-            EvalResult::Assign(_, eval_result) => Self::eval_result_to_value(eval_result),
-            EvalResult::Logical(token, eval_result1, eval_result2) => match (
-                Self::eval_result_to_value(eval_result1),
-                token.lexeme.as_str(),
-            ) {
-                (None | Some(Value::Boolean(false)), "or") => {
-                    Self::eval_result_to_value(eval_result2)
-                }
-                (result1, "or") => result1,
-                (result1 @ (None | Some(Value::Boolean(false))), "and") => result1,
-                (_, "and") => Self::eval_result_to_value(eval_result2),
-                _ => todo!("Shouldn't happen"),
-            },
-        }
-    }
-
-    // TODO: clean up and turn into "side_effects"
-    fn maybe_assign(&mut self, eval_result: &EvalResult) -> Result<(), RuntimeError> {
+    fn handle_side_effects(&mut self, eval_result: &EvalResult) -> Result<(), RuntimeError> {
         if let EvalResult::Assign(var_token, eval_result) = eval_result {
-            self.state.environment.set(
-                &var_token.lexeme,
-                Self::eval_result_to_value(eval_result),
-                false,
-            );
-            return self.maybe_assign(eval_result);
+            self.state
+                .environment
+                .set(&var_token.lexeme, Value::from(eval_result.as_ref()), false);
+            return self.handle_side_effects(eval_result);
         } else if let EvalResult::Logical(token, eval_result1, eval_result2) = eval_result {
-            match (
-                Self::eval_result_to_value(eval_result1),
-                token.lexeme.as_str(),
-            ) {
-                (None | Some(Value::Boolean(false)), "or") => {
-                    self.maybe_assign(eval_result1)?;
-                    return self.maybe_assign(eval_result2);
+            match (Value::from(eval_result1.as_ref()), token.lexeme.as_str()) {
+                (Value::Nil | Value::Boolean(false), "or") => {
+                    self.handle_side_effects(eval_result1)?;
+                    return self.handle_side_effects(eval_result2);
                 }
                 (_, "or") => {
-                    return self.maybe_assign(eval_result1);
+                    return self.handle_side_effects(eval_result1);
                 }
-                (None | Some(Value::Boolean(false)), "and") => {
-                    return self.maybe_assign(eval_result1);
+                (Value::Nil | Value::Boolean(false), "and") => {
+                    return self.handle_side_effects(eval_result1);
                 }
                 (_, "and") => {
-                    self.maybe_assign(eval_result1)?;
-                    return self.maybe_assign(eval_result2);
+                    self.handle_side_effects(eval_result1)?;
+                    return self.handle_side_effects(eval_result2);
                 }
                 _ => {
                     todo!("Shouldn't happen");
