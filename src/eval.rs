@@ -2,20 +2,17 @@ use std::fmt::{Display, Formatter};
 
 use thiserror::Error;
 
-use crate::interpreter::{Environment, Value};
+use crate::interpreter::Interpreter;
 use crate::lexer::{Token, TokenType};
 use crate::parser::{Ast, Expr};
 
 #[derive(Debug, Clone)]
-pub enum EvalResult {
+pub enum Value {
     Number(f64),
     String(String),
     Bool(bool),
     Nil,
-    Assign(Token, Box<EvalResult>),
-    Logical(Token, Box<EvalResult>, Box<EvalResult>),
     Fn(String),
-    FnCall(Token, Vec<EvalResult>),
 }
 
 #[derive(Debug, Error)]
@@ -54,188 +51,174 @@ pub fn eval_error<T>(token: &Token, error: EvalErrorType) -> Result<T, EvalError
     })
 }
 
-impl Display for EvalResult {
+impl Display for Value {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            EvalResult::Number(n) => write!(f, "{}", n),
-            EvalResult::String(s) => write!(f, "{}", s),
-            EvalResult::Bool(b) => write!(f, "{}", b),
-            EvalResult::Nil => write!(f, "nil"),
-            EvalResult::Assign(_, eval_result) => write!(f, "{eval_result}"),
-            EvalResult::Logical(token, eval_result1, eval_result2) => {
-                write!(f, "{eval_result1} {} {eval_result2}", token.lexeme)
-            }
-            EvalResult::FnCall(callee, args) => {
-                write!(
-                    f,
-                    "fn {}({})",
-                    callee.lexeme,
-                    args.iter()
-                        .map(|x| format!("{}", x))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-            }
-            EvalResult::Fn(_) => todo!(),
+            Value::Number(n) => write!(f, "{}", n),
+            Value::String(s) => write!(f, "{}", s),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Nil => write!(f, "nil"),
+            Value::Fn(fun) => write!(f, "<fn {fun}>"),
         }
     }
 }
 
-pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, EvalError> {
+pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, EvalError> {
     match expr {
         Expr::Literal(literal_expr) => match literal_expr {
             crate::parser::LiteralExpr::Lit(literal) => match literal {
-                crate::lexer::Literal::Number(n) => Ok(EvalResult::Number(*n)),
-                crate::lexer::Literal::String(s) => Ok(EvalResult::String(s.clone())),
+                crate::lexer::Literal::Number(n) => Ok(Value::Number(*n)),
+                crate::lexer::Literal::String(s) => Ok(Value::String(s.clone())),
             },
-            crate::parser::LiteralExpr::True => Ok(EvalResult::Bool(true)),
-            crate::parser::LiteralExpr::False => Ok(EvalResult::Bool(false)),
-            crate::parser::LiteralExpr::Nil => Ok(EvalResult::Nil),
+            crate::parser::LiteralExpr::True => Ok(Value::Bool(true)),
+            crate::parser::LiteralExpr::False => Ok(Value::Bool(false)),
+            crate::parser::LiteralExpr::Nil => Ok(Value::Nil),
         },
         Expr::Unary(token, expr) => match token.token_type {
             TokenType::Minus => {
-                if let EvalResult::Number(n) = eval_expr(expr, environment)? {
-                    Ok(EvalResult::Number(-n))
+                if let Value::Number(n) = eval_expr(expr, interpreter)? {
+                    Ok(Value::Number(-n))
                 } else {
                     eval_error(token, OperandMustBeANumber)
                 }
             }
-            TokenType::Bang => match eval_expr(expr, environment)? {
-                EvalResult::Bool(false) | EvalResult::Nil => Ok(EvalResult::Bool(true)),
-                _ => Ok(EvalResult::Bool(false)),
+            TokenType::Bang => match eval_expr(expr, interpreter)? {
+                Value::Bool(false) | Value::Nil => Ok(Value::Bool(true)),
+                _ => Ok(Value::Bool(false)),
             },
             _ => eval_error(token, IvalidOperator),
         },
         Expr::Binary(expr, token, expr1) => match &token.token_type {
             TokenType::Plus => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
                 match (left, right) {
-                    (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Number(l + r)),
-                    (EvalResult::String(l), EvalResult::String(r)) => {
-                        Ok(EvalResult::String(format!("{}{}", l, r)))
+                    (Value::Number(l), Value::Number(r)) => Ok(Value::Number(l + r)),
+                    (Value::String(l), Value::String(r)) => {
+                        Ok(Value::String(format!("{}{}", l, r)))
                     }
                     _ => eval_error(token, OperandsMustBeTwoNumbersOrTwoStrings),
                 }
             }
             TokenType::Minus => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
-                    Ok(EvalResult::Number(l - r))
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
+                    Ok(Value::Number(l - r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
 
             TokenType::Star => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
-                    Ok(EvalResult::Number(l * r))
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
+                    Ok(Value::Number(l * r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::Slash => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
                     if r == 0.0 {
                         return eval_error(token, IvalidOperator);
                     }
-                    Ok(EvalResult::Number(l / r))
+                    Ok(Value::Number(l / r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::EqualEqual => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
                 match (left, right) {
-                    (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Bool(l == r)),
-                    (EvalResult::String(l), EvalResult::String(r)) => Ok(EvalResult::Bool(l == r)),
-                    (EvalResult::Bool(l), EvalResult::Bool(r)) => Ok(EvalResult::Bool(l == r)),
-                    _ => Ok(EvalResult::Bool(false)),
+                    (Value::Number(l), Value::Number(r)) => Ok(Value::Bool(l == r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l == r)),
+                    (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l == r)),
+                    _ => Ok(Value::Bool(false)),
                 }
             }
             TokenType::BangEqual => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
                 match (left, right) {
-                    (EvalResult::Number(l), EvalResult::Number(r)) => Ok(EvalResult::Bool(l != r)),
-                    (EvalResult::String(l), EvalResult::String(r)) => Ok(EvalResult::Bool(l != r)),
-                    (EvalResult::Bool(l), EvalResult::Bool(r)) => Ok(EvalResult::Bool(l != r)),
-                    _ => Ok(EvalResult::Bool(true)),
+                    (Value::Number(l), Value::Number(r)) => Ok(Value::Bool(l != r)),
+                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l != r)),
+                    (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l != r)),
+                    _ => Ok(Value::Bool(true)),
                 }
             }
             TokenType::Greater => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
-                    Ok(EvalResult::Bool(l > r))
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
+                    Ok(Value::Bool(l > r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::GreaterEqual => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
-                    Ok(EvalResult::Bool(l >= r))
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
+                    Ok(Value::Bool(l >= r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::Less => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
-                    Ok(EvalResult::Bool(l < r))
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
+                    Ok(Value::Bool(l < r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
             TokenType::LessEqual => {
-                let left = eval_expr(expr, environment)?;
-                let right = eval_expr(expr1, environment)?;
-                if let (EvalResult::Number(l), EvalResult::Number(r)) = (left, right) {
-                    Ok(EvalResult::Bool(l <= r))
+                let left = eval_expr(expr, interpreter)?;
+                let right = eval_expr(expr1, interpreter)?;
+                if let (Value::Number(l), Value::Number(r)) = (left, right) {
+                    Ok(Value::Bool(l <= r))
                 } else {
                     eval_error(token, OperandsMustBeNumbers)
                 }
             }
             _ => eval_error(token, IvalidOperator),
         },
-        Expr::Grouping(expr) => eval_expr(expr, environment),
+        Expr::Grouping(expr) => eval_expr(expr, interpreter),
         Expr::Var(token) => {
-            if let Some(value) = environment.get(&token.lexeme) {
-                match value {
-                    Value::Number(n) => Ok(EvalResult::Number(*n)),
-                    Value::String(s) => Ok(EvalResult::String(s.clone())),
-                    Value::Boolean(b) => Ok(EvalResult::Bool(*b)),
-                    Value::Nil => Ok(EvalResult::Nil),
-                    Value::Function(fun) => Ok(EvalResult::Fn(fun.to_string())),
-                }
+            if let Some(value) = interpreter.state.environment.get(&token.lexeme) {
+                Ok(value.clone())
             } else {
                 eval_error(token, UndefinedVariable)
             }
         }
         Expr::Assign(token, expr) => {
-            let result = eval_expr(expr, environment)?;
-            if environment.get(&token.lexeme).is_none() {
+            let result = eval_expr(expr, interpreter)?;
+            if !interpreter
+                .state
+                .environment
+                .set(&token.lexeme, result.clone(), false)
+            {
                 return eval_error(token, UndefinedVariable);
             }
-            Ok(EvalResult::Assign(token.clone(), Box::new(result)))
+            Ok(result)
         }
         Expr::Logical(expr1, operator, expr2) => {
-            let result1 = eval_expr(expr1, environment)?;
-            let result2 = eval_expr(expr2, environment)?;
-            Ok(EvalResult::Logical(
-                operator.clone(),
-                Box::new(result1),
-                Box::new(result2),
-            ))
+            let result1 = eval_expr(expr1, interpreter)?;
+            match (result1.clone(), operator.lexeme.as_str()) {
+                (Value::Nil | Value::Bool(false), "or") => Ok(eval_expr(expr2, interpreter)?),
+                (_, "or") => Ok(result1),
+                (Value::Nil | Value::Bool(false), "and") => Ok(result1),
+                (_, "and") => Ok(eval_expr(expr2, interpreter)?),
+                _ => {
+                    todo!("Shouldn't happen");
+                }
+            }
         }
         Expr::FnCall(callee, token, args) => match callee.as_ref() {
             Expr::Var(
@@ -247,12 +230,12 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
             ) => {
                 let mut call_args = vec![];
                 for expr in args {
-                    call_args.push(eval_expr(expr, environment)?)
+                    call_args.push(eval_expr(expr, interpreter)?)
                 }
                 if is_primitive(lexeme) {
                     eval_primitive_function(lexeme, token, call_args)
                 } else {
-                    Ok(EvalResult::FnCall(callee.clone(), call_args))
+                    interpreter.call_function(callee, call_args)
                 }
             }
             _ => todo!(),
@@ -263,10 +246,10 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
 fn eval_primitive_function(
     callee: &str,
     token: &Token,
-    _vec: Vec<EvalResult>,
-) -> Result<EvalResult, EvalError> {
+    _vec: Vec<Value>,
+) -> Result<Value, EvalError> {
     match callee {
-        "clock" => Ok(EvalResult::Number(
+        "clock" => Ok(Value::Number(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -283,8 +266,8 @@ fn is_primitive(callee: &str) -> bool {
     }
 }
 
-pub fn eval_ast(ast: &Ast) -> Result<EvalResult, EvalError> {
+pub fn eval_ast(ast: &Ast) -> Result<Value, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(expr, &Environment::new()),
+        Ast::Expr(expr) => eval_expr(expr, &mut Interpreter::new(vec![])),
     }
 }

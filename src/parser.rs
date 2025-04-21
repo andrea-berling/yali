@@ -320,6 +320,15 @@ impl Parser {
 
                 Ok(Statement::Block(equivalent_statements))
             }
+            TT::Keyword if lexeme == "return" => {
+                let return_token = expect!(self, TT::Keyword, "return").clone();
+                let return_expr = if !next_token_matches!(self, TT::Semicolon) {
+                    Some(self.expr()?)
+                } else {
+                    None
+                };
+                Ok(Statement::Return(return_token, return_expr))
+            }
             _ => {
                 let expr = self.expr()?;
                 Ok(Statement::Expr(expr))
@@ -434,6 +443,7 @@ pub enum Statement {
     Block(Vec<Declaration>),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
     While(Expr, Box<Statement>),
+    Return(Token, Option<Expr>),
 }
 
 #[derive(Clone, Debug)]
