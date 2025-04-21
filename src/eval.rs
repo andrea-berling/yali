@@ -2,9 +2,9 @@ use std::fmt::{Display, Formatter};
 
 use thiserror::Error;
 
-use crate::interpreter::Interpreter;
+use crate::interpreter::{Environment, Interpreter};
 use crate::lexer::{Token, TokenType};
-use crate::parser::{Ast, Expr};
+use crate::parser::{Ast, Declaration, Expr};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -12,7 +12,7 @@ pub enum Value {
     String(String),
     Bool(bool),
     Nil,
-    Fn(String),
+    Fn(String, Vec<Token>, Vec<Declaration>, Environment),
 }
 
 #[derive(Debug, Error)]
@@ -27,6 +27,8 @@ pub enum EvalErrorType {
     OperandsMustBeTwoNumbersOrTwoStrings,
     #[error("Undefined variable")]
     UndefinedVariable,
+    #[error("Undefined variable or function")]
+    UndefinedVariableOrFunction,
     #[error("Undefined primitive function")]
     UndefinedPrimitiveFunction,
     #[error("Undefined function")]
@@ -58,7 +60,7 @@ impl Display for Value {
             Value::String(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
-            Value::Fn(fun) => write!(f, "<fn {fun}>"),
+            Value::Fn(fun, _, _, _) => write!(f, "<fn {fun}>"),
         }
     }
 }
@@ -194,7 +196,7 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
             if let Some(value) = interpreter.state.environment.get(&token.lexeme) {
                 Ok(value.clone())
             } else {
-                eval_error(token, UndefinedVariable)
+                eval_error(token, UndefinedVariableOrFunction)
             }
         }
         Expr::Assign(token, expr) => {
@@ -220,26 +222,20 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 }
             }
         }
-        Expr::FnCall(callee, token, args) => match callee.as_ref() {
-            Expr::Var(
-                callee @ Token {
-                    token_type: TokenType::Identifier,
-                    lexeme,
-                    ..
-                },
-            ) => {
-                let mut call_args = vec![];
-                for expr in args {
-                    call_args.push(eval_expr(expr, interpreter)?)
-                }
-                if is_primitive(lexeme) {
-                    eval_primitive_function(lexeme, token, call_args)
-                } else {
-                    interpreter.call_function(callee, call_args)
-                }
+        Expr::FnCall(callee, token, args) => {
+            let mut call_args = vec![];
+            for expr in args {
+                call_args.push(eval_expr(expr, interpreter)?)
             }
-            _ => todo!(),
-        },
+            let Ok(Value::Fn(fun, _, _, _)) = eval_expr(callee, interpreter) else {
+                return eval_error(token, UndefinedFunction);
+            };
+            if is_primitive(&fun) {
+                eval_primitive_function(&fun, token, call_args)
+            } else {
+                interpreter.call_function(callee, call_args, token)
+            }
+        }
     }
 }
 

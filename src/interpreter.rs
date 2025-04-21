@@ -19,11 +19,13 @@ pub enum RuntimeError {
     EarlyExit(Value),
 }
 
-pub struct Environment(VecDeque<std::collections::HashMap<String, Value>>);
+type Scope = std::collections::HashMap<String, Value>;
+
+#[derive(Debug, Clone)]
+pub struct Environment(VecDeque<Scope>);
 
 pub struct State {
     pub environment: Environment,
-    pub functions: HashMap<String, (Vec<String>, Vec<Declaration>)>,
 }
 
 pub struct Interpreter {
@@ -33,7 +35,16 @@ pub struct Interpreter {
 
 impl Environment {
     pub fn new() -> Self {
-        Self(VecDeque::from(vec![std::collections::HashMap::new()]))
+        // TODO: Clean this crap up
+        Self(VecDeque::from(vec![std::collections::HashMap::from([(
+            "clock".to_string(),
+            Value::Fn(
+                "clock".to_string(),
+                vec![],
+                vec![],
+                Self(VecDeque::from(vec![HashMap::new()])),
+            ),
+        )])]))
     }
 
     pub fn get(&self, name: &str) -> Option<&Value> {
@@ -54,8 +65,20 @@ impl Environment {
         None
     }
 
-    pub fn add_scope(&mut self) {
+    pub fn new_scope(&mut self) {
         self.0.push_front(std::collections::HashMap::new());
+    }
+
+    pub fn add_scopes(&mut self, scopes: &[Scope]) {
+        for scope in scopes {
+            self.0.push_front(scope.clone());
+        }
+    }
+
+    pub fn drop_scopes(&mut self, n: usize) {
+        for _ in 0..n {
+            self.0.pop_front();
+        }
     }
 
     pub fn drop_scope(&mut self) {
@@ -78,6 +101,12 @@ impl Environment {
             true
         }
     }
+
+    pub fn take_snapshot(&self) -> Self {
+        let mut scopes = self.0.clone();
+        scopes.pop_back();
+        Self(scopes)
+    }
 }
 
 impl Interpreter {
@@ -86,7 +115,6 @@ impl Interpreter {
             program,
             state: State {
                 environment: Environment::new(),
-                functions: HashMap::new(),
             },
         }
     }
@@ -102,7 +130,7 @@ impl Interpreter {
                 Ok(())
             }
             Statement::Block(declarations) => {
-                self.state.environment.add_scope();
+                self.state.environment.new_scope();
                 for declaration in declarations.iter() {
                     self.declaration(declaration)?;
                 }
@@ -154,16 +182,16 @@ impl Interpreter {
             }
             Declaration::Statement(statement) => self.statement(statement),
             Declaration::Function(name, args, body) => {
-                self.state.functions.insert(
-                    name.lexeme.clone(),
-                    (
-                        args.iter().map(|x| x.lexeme.clone()).collect(),
+                self.state.environment.set(
+                    &name.lexeme,
+                    Value::Fn(
+                        name.lexeme.clone(),
+                        args.clone(),
                         body.clone(),
+                        self.state.environment.take_snapshot(),
                     ),
+                    true,
                 );
-                self.state
-                    .environment
-                    .set(&name.lexeme, Value::Fn(name.lexeme.clone()), true);
                 Ok(())
             }
         }
@@ -182,11 +210,11 @@ impl Interpreter {
 
     pub fn call_function(
         &mut self,
-        token: &Token,
+        function_expr: &Expr,
         call_args: Vec<Value>,
+        token: &Token,
     ) -> Result<Value, EvalError> {
-        let function_name = &token.lexeme;
-        let Some((parameters, body)) = self.state.functions.get(function_name).cloned() else {
+        let Value::Fn(_, parameters, body, environment) = eval_expr(function_expr, self)? else {
             return eval_error(token, EvalErrorType::UndefinedFunction)?;
         };
         if parameters.len() != call_args.len() {
@@ -195,10 +223,14 @@ impl Interpreter {
                 EvalErrorType::WrongArgumentNumber(parameters.len(), call_args.len()),
             )?;
         }
-        self.state.environment.add_scope();
-        for (var_name, var_value) in zip(parameters, call_args) {
+        let n_scopes = environment.0.len();
+        self.state
+            .environment
+            .add_scopes(environment.0.into_iter().collect::<Vec<_>>().as_slice());
+        self.state.environment.new_scope();
+        for (var_token, var_value) in zip(parameters, call_args) {
             let latest_scope = self.state.environment.0.front_mut().unwrap();
-            latest_scope.insert(var_name.clone(), var_value);
+            latest_scope.insert(var_token.lexeme.clone(), var_value);
         }
         let mut return_value = Value::Nil;
         for declaration in body {
@@ -211,7 +243,7 @@ impl Interpreter {
                 return Err(err);
             }
         }
-        self.state.environment.drop_scope();
+        self.state.environment.drop_scopes(n_scopes + 1);
         Ok(return_value)
     }
 }

@@ -164,18 +164,17 @@ impl Parser {
     }
 
     fn function_call(&mut self) -> Result<Expr, ParsingError> {
-        let callee = self.primary()?;
-        if next_token_matches!(self, TT::LeftParen) {
+        let mut callee = self.primary()?;
+        while next_token_matches!(self, TT::LeftParen) {
             let lparen = self.advance().unwrap().clone();
             let mut arguments: Vec<Expr> = vec![];
             if !next_token_matches!(self, TT::RightParen) {
                 arguments.append(&mut self.arguments()?);
             }
             expect!(self, TT::RightParen);
-            Ok(Expr::FnCall(Box::new(callee), lparen, arguments))
-        } else {
-            Ok(callee)
+            callee = Expr::FnCall(Box::new(callee), lparen, arguments)
         }
+        Ok(callee)
     }
 
     fn unary(&mut self) -> Result<Expr, ParsingError> {
