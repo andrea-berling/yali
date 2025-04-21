@@ -71,6 +71,7 @@ macro_rules! expect {
                     }
                 }
             }
+            next_token.unwrap()
         }
     };
 }
@@ -332,17 +333,7 @@ impl Parser {
     }
 
     pub fn var_declaration(&mut self) -> Result<Declaration, ParsingError> {
-        if !matches!(self.advance(),
-        Some(Token {
-            token_type: TT::Keyword,
-            lexeme,
-            ..
-        }) if lexeme == "var")
-        {
-            return self.error(UnexpectedToken {
-                expected: "'var'".to_string(),
-            });
-        }
+        expect!(self, TT::Keyword, "var");
         let Some(
             identifier_token @ Token {
                 token_type: TT::Identifier,
@@ -369,9 +360,35 @@ impl Parser {
         Ok(Declaration::Var(identifier_token, expression))
     }
 
+    pub fn fun_declaration(&mut self) -> Result<Declaration, ParsingError> {
+        expect!(self, TT::Keyword, "fun");
+        let identifier_token = expect!(self, TT::Identifier).clone();
+
+        let mut arguments = vec![];
+        expect!(self, TT::LeftParen);
+        if !next_token_matches!(self, TT::RightParen) {
+            arguments.push(expect!(self, TT::Identifier).clone());
+            while next_token_matches!(self, TT::Comma) {
+                expect!(self, TT::Comma);
+                arguments.push(expect!(self, TT::Identifier).clone());
+            }
+        }
+
+        expect!(self, TT::RightParen);
+        let Statement::Block(body) = self.statement()? else {
+            return self.error(UnexpectedToken {
+                expected: "block".to_string(),
+            });
+        };
+
+        Ok(Declaration::Function(identifier_token, arguments, body))
+    }
+
     pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
         if next_token_matches!(self, TT::Keyword, "var") {
             Ok(self.var_declaration()?)
+        } else if next_token_matches!(self, TT::Keyword, "fun") {
+            Ok(self.fun_declaration()?)
         } else if self.peek().is_some() {
             Ok(Declaration::Statement(self.statement()?))
         } else {
@@ -407,6 +424,7 @@ pub type Program = Vec<Declaration>;
 pub enum Declaration {
     Var(Token, Option<Expr>),
     Statement(Statement),
+    Function(Token, Vec<Token>, Vec<Declaration>),
 }
 
 #[derive(Clone, Debug)]

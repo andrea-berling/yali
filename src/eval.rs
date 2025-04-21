@@ -6,7 +6,7 @@ use crate::interpreter::{Environment, Value};
 use crate::lexer::{Token, TokenType};
 use crate::parser::{Ast, Expr};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EvalResult {
     Number(f64),
     String(String),
@@ -14,6 +14,8 @@ pub enum EvalResult {
     Nil,
     Assign(Token, Box<EvalResult>),
     Logical(Token, Box<EvalResult>, Box<EvalResult>),
+    Fn(String),
+    FnCall(Token, Vec<EvalResult>),
 }
 
 #[derive(Debug, Error)]
@@ -28,6 +30,12 @@ pub enum EvalErrorType {
     OperandsMustBeTwoNumbersOrTwoStrings,
     #[error("Undefined variable")]
     UndefinedVariable,
+    #[error("Undefined primitive function")]
+    UndefinedPrimitiveFunction,
+    #[error("Undefined function")]
+    UndefinedFunction,
+    #[error("Wrong argument number: expected {0}, got {1}")]
+    WrongArgumentNumber(usize, usize),
 }
 
 use EvalErrorType::*;
@@ -39,7 +47,7 @@ pub struct EvalError {
     error: EvalErrorType,
 }
 
-fn eval_error<T>(token: &Token, error: EvalErrorType) -> Result<T, EvalError> {
+pub fn eval_error<T>(token: &Token, error: EvalErrorType) -> Result<T, EvalError> {
     Err(EvalError {
         token: token.clone(),
         error,
@@ -57,6 +65,18 @@ impl Display for EvalResult {
             EvalResult::Logical(token, eval_result1, eval_result2) => {
                 write!(f, "{eval_result1} {} {eval_result2}", token.lexeme)
             }
+            EvalResult::FnCall(callee, args) => {
+                write!(
+                    f,
+                    "fn {}({})",
+                    callee.lexeme,
+                    args.iter()
+                        .map(|x| format!("{}", x))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
+            EvalResult::Fn(_) => todo!(),
         }
     }
 }
@@ -195,6 +215,7 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                     Value::String(s) => Ok(EvalResult::String(s.clone())),
                     Value::Boolean(b) => Ok(EvalResult::Bool(*b)),
                     Value::Nil => Ok(EvalResult::Nil),
+                    Value::Function(fun) => Ok(EvalResult::Fn(fun.to_string())),
                 }
             } else {
                 eval_error(token, UndefinedVariable)
@@ -216,19 +237,49 @@ pub fn eval_expr(expr: &Expr, environment: &Environment) -> Result<EvalResult, E
                 Box::new(result2),
             ))
         }
-        Expr::FnCall(callee, token, vec) => match callee.as_ref() {
-            Expr::Var(Token {
-                token_type: TokenType::Identifier,
-                lexeme,
-                ..
-            }) if lexeme == "clock" => Ok(EvalResult::Number(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as f64,
-            )),
+        Expr::FnCall(callee, token, args) => match callee.as_ref() {
+            Expr::Var(
+                callee @ Token {
+                    token_type: TokenType::Identifier,
+                    lexeme,
+                    ..
+                },
+            ) => {
+                let mut call_args = vec![];
+                for expr in args {
+                    call_args.push(eval_expr(expr, environment)?)
+                }
+                if is_primitive(lexeme) {
+                    eval_primitive_function(lexeme, token, call_args)
+                } else {
+                    Ok(EvalResult::FnCall(callee.clone(), call_args))
+                }
+            }
             _ => todo!(),
         },
+    }
+}
+
+fn eval_primitive_function(
+    callee: &str,
+    token: &Token,
+    _vec: Vec<EvalResult>,
+) -> Result<EvalResult, EvalError> {
+    match callee {
+        "clock" => Ok(EvalResult::Number(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as f64,
+        )),
+        _ => eval_error(token, UndefinedPrimitiveFunction),
+    }
+}
+
+fn is_primitive(callee: &str) -> bool {
+    match callee {
+        "clock" => true,
+        _ => false,
     }
 }
 

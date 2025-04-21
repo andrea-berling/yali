@@ -1,9 +1,13 @@
-use std::{collections::VecDeque, fmt::Display};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Display,
+    iter::zip,
+};
 
 use thiserror::Error;
 
 use crate::{
-    eval::{EvalError, EvalResult},
+    eval::{eval_error, EvalError, EvalErrorType, EvalResult},
     parser::{Declaration, Expr, Program, Statement},
 };
 
@@ -19,6 +23,7 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Nil,
+    Function(String),
 }
 
 impl Display for Value {
@@ -28,6 +33,7 @@ impl Display for Value {
             Value::String(s) => write!(f, "{s}"),
             Value::Boolean(b) => write!(f, "{b}"),
             Value::Nil => write!(f, "nil"),
+            Value::Function(func) => write!(f, "<fn {func}>"),
         }
     }
 }
@@ -49,6 +55,8 @@ impl From<&EvalResult> for Value {
                     _ => todo!("Shouldn't happen"),
                 }
             }
+            EvalResult::FnCall(token, vec) => todo!(),
+            EvalResult::Fn(func) => Value::Function(func.to_string()),
         }
     }
 }
@@ -57,6 +65,7 @@ pub struct Environment(VecDeque<std::collections::HashMap<String, Value>>);
 
 pub struct State {
     pub environment: Environment,
+    pub functions: HashMap<String, (Vec<String>, Vec<Declaration>)>,
 }
 
 pub struct Interpreter {
@@ -119,12 +128,14 @@ impl Interpreter {
             program,
             state: State {
                 environment: Environment::new(),
+                functions: HashMap::new(),
             },
         }
     }
 
     fn eval_expr(&mut self, expr: &Expr) -> Result<EvalResult, RuntimeError> {
-        let eval_result = crate::eval::eval_expr(expr, &self.state.environment)?;
+        let eval_result =
+            self.handle_function_calls(crate::eval::eval_expr(expr, &self.state.environment)?)?;
         self.handle_side_effects(&eval_result)?;
         Ok(eval_result)
     }
@@ -183,6 +194,21 @@ impl Interpreter {
                 Ok(())
             }
             Declaration::Statement(statement) => self.statement(statement),
+            Declaration::Function(name, args, body) => {
+                self.state.functions.insert(
+                    name.lexeme.clone(),
+                    (
+                        args.iter().map(|x| x.lexeme.clone()).collect(),
+                        body.clone(),
+                    ),
+                );
+                self.state.environment.set(
+                    &name.lexeme,
+                    Value::Function(name.lexeme.clone()),
+                    true,
+                );
+                Ok(())
+            }
         }
     }
 
@@ -198,32 +224,93 @@ impl Interpreter {
     }
 
     fn handle_side_effects(&mut self, eval_result: &EvalResult) -> Result<(), RuntimeError> {
-        if let EvalResult::Assign(var_token, eval_result) = eval_result {
-            self.state
-                .environment
-                .set(&var_token.lexeme, Value::from(eval_result.as_ref()), false);
-            return self.handle_side_effects(eval_result);
-        } else if let EvalResult::Logical(token, eval_result1, eval_result2) = eval_result {
-            match (Value::from(eval_result1.as_ref()), token.lexeme.as_str()) {
-                (Value::Nil | Value::Boolean(false), "or") => {
-                    self.handle_side_effects(eval_result1)?;
-                    return self.handle_side_effects(eval_result2);
-                }
-                (_, "or") => {
-                    return self.handle_side_effects(eval_result1);
-                }
-                (Value::Nil | Value::Boolean(false), "and") => {
-                    return self.handle_side_effects(eval_result1);
-                }
-                (_, "and") => {
-                    self.handle_side_effects(eval_result1)?;
-                    return self.handle_side_effects(eval_result2);
-                }
-                _ => {
-                    todo!("Shouldn't happen");
+        match eval_result {
+            EvalResult::Assign(var_token, eval_result) => {
+                self.state.environment.set(
+                    &var_token.lexeme,
+                    Value::from(eval_result.as_ref()),
+                    false,
+                );
+                return self.handle_side_effects(eval_result);
+            }
+            EvalResult::Logical(token, eval_result1, eval_result2) => {
+                match (Value::from(eval_result1.as_ref()), token.lexeme.as_str()) {
+                    (Value::Nil | Value::Boolean(false), "or") => {
+                        self.handle_side_effects(eval_result1)?;
+                        return self.handle_side_effects(eval_result2);
+                    }
+                    (_, "or") => {
+                        return self.handle_side_effects(eval_result1);
+                    }
+                    (Value::Nil | Value::Boolean(false), "and") => {
+                        return self.handle_side_effects(eval_result1);
+                    }
+                    (_, "and") => {
+                        self.handle_side_effects(eval_result1)?;
+                        return self.handle_side_effects(eval_result2);
+                    }
+                    _ => {
+                        todo!("Shouldn't happen");
+                    }
                 }
             }
+            EvalResult::Number(_)
+            | EvalResult::String(_)
+            | EvalResult::Bool(_)
+            | EvalResult::Nil => {}
+            EvalResult::FnCall(_, vec) => {
+                for result in vec {
+                    self.handle_side_effects(result)?
+                }
+            }
+            EvalResult::Fn(_) => (),
         }
         Ok(())
+    }
+
+    fn handle_function_calls(
+        &mut self,
+        eval_result: EvalResult,
+    ) -> Result<EvalResult, RuntimeError> {
+        match eval_result {
+            EvalResult::Number(_)
+            | EvalResult::String(_)
+            | EvalResult::Bool(_)
+            | EvalResult::Nil => Ok(eval_result),
+            EvalResult::Assign(t, eval_result) => Ok(EvalResult::Assign(
+                t,
+                Box::new(self.handle_function_calls(*eval_result)?),
+            )),
+            EvalResult::Logical(operator, result1, result2) => Ok(EvalResult::Logical(
+                operator,
+                Box::new(self.handle_function_calls(*result1)?),
+                Box::new(self.handle_function_calls(*result2)?),
+            )),
+            EvalResult::FnCall(ref token, ref call_args) => {
+                let function_name = &token.lexeme;
+                let Some((parameters, body)) = self.state.functions.get(function_name).cloned()
+                else {
+                    return eval_error(token, EvalErrorType::UndefinedFunction)?;
+                };
+                if parameters.len() != call_args.len() {
+                    return eval_error(
+                        token,
+                        EvalErrorType::WrongArgumentNumber(parameters.len(), call_args.len()),
+                    )?;
+                }
+                self.state.environment.add_scope();
+                for (var_name, var_value) in zip(parameters, call_args) {
+                    let var_value = Value::from(&self.handle_function_calls(var_value.clone())?);
+                    let latest_scope = self.state.environment.0.front_mut().unwrap();
+                    latest_scope.insert(var_name.clone(), var_value);
+                }
+                for declaration in body {
+                    self.declaration(&declaration)?;
+                }
+                self.state.environment.drop_scope();
+                Ok(eval_result.clone())
+            }
+            EvalResult::Fn(_) => Ok(eval_result),
+        }
     }
 }
