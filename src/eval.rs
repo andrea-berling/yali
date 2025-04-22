@@ -12,7 +12,12 @@ pub enum Value {
     String(String),
     Bool(bool),
     Nil,
-    Fn(String, Vec<Token>, Vec<Declaration>, Environment),
+    Fn {
+        name: String,
+        formal_args: Vec<Token>,
+        body: Vec<Declaration>,
+        environment: Environment,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -60,7 +65,7 @@ impl Display for Value {
             Value::String(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
-            Value::Fn(fun, _, _, _) => write!(f, "<fn {fun}>"),
+            Value::Fn { name, .. } => write!(f, "<fn {name}>"),
         }
     }
 }
@@ -227,11 +232,11 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
             for expr in args {
                 call_args.push(eval_expr(expr, interpreter)?)
             }
-            let Ok(Value::Fn(fun, _, _, _)) = eval_expr(callee, interpreter) else {
+            let Ok(Value::Fn { name, .. }) = eval_expr(callee, interpreter) else {
                 return eval_error(token, UndefinedFunction);
             };
-            if is_primitive(&fun) {
-                eval_primitive_function(&fun, token, call_args)
+            if is_primitive(&name) {
+                eval_primitive_function(&name, token, call_args)
             } else {
                 interpreter.call_function(callee, call_args, token)
             }

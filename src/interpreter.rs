@@ -16,10 +16,10 @@ pub enum RuntimeError {
     #[error(transparent)]
     EvalError(#[from] EvalError),
     #[error("No error")]
-    EarlyExit(Value),
+    EarlyExit(Box<Value>),
 }
 
-type Scope = std::collections::HashMap<String, Value>;
+type Scope = (usize, std::collections::HashMap<String, Value>);
 
 #[derive(Debug, Clone)]
 pub struct Environment(VecDeque<Scope>);
@@ -31,24 +31,28 @@ pub struct State {
 pub struct Interpreter {
     pub program: Program,
     pub state: State,
+    pub scope_index: usize,
 }
 
 impl Environment {
     pub fn new() -> Self {
         // TODO: Clean this crap up
-        Self(VecDeque::from(vec![std::collections::HashMap::from([(
-            "clock".to_string(),
-            Value::Fn(
+        Self(VecDeque::from(vec![(
+            0,
+            std::collections::HashMap::from([(
                 "clock".to_string(),
-                vec![],
-                vec![],
-                Self(VecDeque::from(vec![HashMap::new()])),
-            ),
-        )])]))
+                Value::Fn {
+                    name: "clock".to_string(),
+                    formal_args: vec![],
+                    body: vec![],
+                    environment: Self(VecDeque::from(vec![(0, HashMap::new())])),
+                },
+            )]),
+        )]))
     }
 
     pub fn get(&self, name: &str) -> Option<&Value> {
-        for scope in self.0.iter() {
+        for (_, scope) in self.0.iter() {
             if let Some(value) = scope.get(name) {
                 return Some(value);
             }
@@ -57,7 +61,7 @@ impl Environment {
     }
 
     pub fn get_mut(&mut self, name: &str) -> Option<&mut Value> {
-        for scope in self.0.iter_mut() {
+        for (_, scope) in self.0.iter_mut() {
             if let Some(value) = scope.get_mut(name) {
                 return Some(value);
             }
@@ -65,8 +69,9 @@ impl Environment {
         None
     }
 
-    pub fn new_scope(&mut self) {
-        self.0.push_front(std::collections::HashMap::new());
+    pub fn new_scope(&mut self, scope_id: usize) {
+        self.0
+            .push_front((scope_id, std::collections::HashMap::new()));
     }
 
     pub fn add_scopes(&mut self, scopes: &[Scope]) {
@@ -81,6 +86,15 @@ impl Environment {
         }
     }
 
+    pub fn pop_scopes(&mut self, n: usize) -> Vec<Scope> {
+        let mut result = vec![];
+        for _ in 0..n {
+            result.push(self.0.pop_front().unwrap());
+        }
+        result.reverse();
+        result
+    }
+
     pub fn drop_scope(&mut self) {
         self.0.pop_front();
     }
@@ -91,7 +105,7 @@ impl Environment {
             .front_mut()
             .expect("Environment should have at least one scope");
         if new {
-            latest_scope.insert(name.to_string(), value);
+            latest_scope.1.insert(name.to_string(), value);
             true
         } else {
             let Some(old_value) = self.get_mut(name) else {
@@ -103,9 +117,7 @@ impl Environment {
     }
 
     pub fn take_snapshot(&self) -> Self {
-        let mut scopes = self.0.clone();
-        scopes.pop_back();
-        Self(scopes)
+        Self(self.0.clone())
     }
 }
 
@@ -116,6 +128,7 @@ impl Interpreter {
             state: State {
                 environment: Environment::new(),
             },
+            scope_index: 0,
         }
     }
 
@@ -130,7 +143,8 @@ impl Interpreter {
                 Ok(())
             }
             Statement::Block(declarations) => {
-                self.state.environment.new_scope();
+                self.scope_index += 1;
+                self.state.environment.new_scope(self.scope_index);
                 for declaration in declarations.iter() {
                     self.declaration(declaration)?;
                 }
@@ -154,11 +168,11 @@ impl Interpreter {
                 }
                 Ok(())
             }
-            Statement::Return(_, expr) => Err(RuntimeError::EarlyExit(eval_expr(
+            Statement::Return(_, expr) => Err(RuntimeError::EarlyExit(Box::new(eval_expr(
                 expr.as_ref()
                     .unwrap_or(&Expr::Literal(crate::parser::LiteralExpr::Nil)),
                 self,
-            )?)),
+            )?))),
         }
     }
 
@@ -184,12 +198,12 @@ impl Interpreter {
             Declaration::Function(name, args, body) => {
                 self.state.environment.set(
                     &name.lexeme,
-                    Value::Fn(
-                        name.lexeme.clone(),
-                        args.clone(),
-                        body.clone(),
-                        self.state.environment.take_snapshot(),
-                    ),
+                    Value::Fn {
+                        name: name.lexeme.clone(),
+                        formal_args: args.clone(),
+                        body: body.clone(),
+                        environment: self.state.environment.take_snapshot(),
+                    },
                     true,
                 );
                 Ok(())
@@ -214,36 +228,59 @@ impl Interpreter {
         call_args: Vec<Value>,
         token: &Token,
     ) -> Result<Value, EvalError> {
-        let Value::Fn(_, parameters, body, environment) = eval_expr(function_expr, self)? else {
+        let Value::Fn {
+            name,
+            formal_args,
+            body,
+            environment: fn_environment,
+            ..
+        } = eval_expr(function_expr, self)?
+        else {
             return eval_error(token, EvalErrorType::UndefinedFunction)?;
         };
-        if parameters.len() != call_args.len() {
+        if formal_args.len() != call_args.len() {
             return eval_error(
                 token,
-                EvalErrorType::WrongArgumentNumber(parameters.len(), call_args.len()),
+                EvalErrorType::WrongArgumentNumber(formal_args.len(), call_args.len()),
             )?;
         }
-        let n_scopes = environment.0.len();
-        self.state
+        let n_scopes = fn_environment.0.len();
+        let n_scopes_to_keep = zip(
+            fn_environment.0.iter().rev(),
+            self.state.environment.0.iter().rev(),
+        )
+        .take_while(|(x, y)| x.0 == y.0)
+        .count();
+        let old_scopes = self
+            .state
             .environment
-            .add_scopes(environment.0.into_iter().collect::<Vec<_>>().as_slice());
-        self.state.environment.new_scope();
-        for (var_token, var_value) in zip(parameters, call_args) {
-            let latest_scope = self.state.environment.0.front_mut().unwrap();
+            .pop_scopes(self.state.environment.0.len() - n_scopes_to_keep);
+        self.state.environment.add_scopes(
+            fn_environment.0.clone().make_contiguous()[n_scopes_to_keep..]
+                .iter()
+                .cloned()
+                .rev()
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        self.scope_index += 1;
+        self.state.environment.new_scope(self.scope_index);
+        for (var_token, var_value) in zip(formal_args, call_args) {
+            let (_, latest_scope) = self.state.environment.0.front_mut().unwrap();
             latest_scope.insert(var_token.lexeme.clone(), var_value);
         }
         let mut return_value = Value::Nil;
-        for declaration in body {
-            let val = self.declaration(&declaration);
-            if let Err(RuntimeError::EarlyExit(val)) = val {
-                return_value = val;
-                break;
+        match self.statement(&Statement::Block(body)) {
+            Err(RuntimeError::EarlyExit(val)) => return_value = *val,
+            Err(RuntimeError::EvalError(e)) => {
+                return Err(e);
             }
-            if let Err(RuntimeError::EvalError(err)) = val {
-                return Err(err);
-            }
-        }
-        self.state.environment.drop_scopes(n_scopes + 1);
+            _ => {}
+        };
+        self.state
+            .environment
+            .drop_scopes(n_scopes - n_scopes_to_keep + 1);
+        self.state.environment.add_scopes(&old_scopes);
         Ok(return_value)
     }
 }
