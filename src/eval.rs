@@ -2,9 +2,9 @@ use std::fmt::{Display, Formatter};
 
 use thiserror::Error;
 
-use crate::interpreter::{Environment, Interpreter};
+use crate::interpreter::{Interpreter, ScopedEnvironment};
 use crate::lexer::{Token, TokenType};
-use crate::parser::{Ast, Declaration, Expr};
+use crate::parser::{Ast, Expr, Statement};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -15,8 +15,8 @@ pub enum Value {
     Fn {
         name: String,
         formal_args: Vec<Token>,
-        body: Vec<Declaration>,
-        environment: Environment,
+        body: Statement,
+        environment: ScopedEnvironment,
     },
 }
 
@@ -49,6 +49,12 @@ use EvalErrorType::*;
 pub struct EvalError {
     token: Token,
     error: EvalErrorType,
+}
+
+impl EvalError {
+    pub fn set_token(&mut self, token: &Token) {
+        self.token = token.clone()
+    }
 }
 
 pub fn eval_error<T>(token: &Token, error: EvalErrorType) -> Result<T, EvalError> {
@@ -198,7 +204,7 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
         },
         Expr::Grouping(expr) => eval_expr(expr, interpreter),
         Expr::Var(token) => {
-            if let Some(value) = interpreter.state.environment.get(&token.lexeme) {
+            if let Some(value) = interpreter.get_var(&token.lexeme) {
                 Ok(value.clone())
             } else {
                 eval_error(token, UndefinedVariableOrFunction)
@@ -206,11 +212,7 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
         }
         Expr::Assign(token, expr) => {
             let result = eval_expr(expr, interpreter)?;
-            if !interpreter
-                .state
-                .environment
-                .set(&token.lexeme, result.clone(), false)
-            {
+            if !interpreter.set_var(&token.lexeme, result.clone(), false) {
                 return eval_error(token, UndefinedVariable);
             }
             Ok(result)
@@ -263,12 +265,16 @@ fn eval_primitive_function(
 fn is_primitive(callee: &str) -> bool {
     match callee {
         "clock" => true,
+        "" => false, // rids us of warnings
         _ => false,
     }
 }
 
 pub fn eval_ast(ast: &Ast) -> Result<Value, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(expr, &mut Interpreter::new(vec![])),
+        Ast::Expr(expr) => eval_expr(
+            expr,
+            &mut Interpreter::new(Statement::Block(vec![], "0".to_string())),
+        ),
     }
 }

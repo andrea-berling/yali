@@ -9,7 +9,7 @@ pub const KEYWORDS: [&str; 16] = [
 
 macro_rules! define_token_types {
     ( $( $token_type:ident, $representation:literal ),*) => {
-        #[derive(Debug, PartialEq,Clone)]
+        #[derive(Debug, PartialEq,Clone,)]
         pub enum TokenType {
             $( $token_type ),*
         }
@@ -205,13 +205,13 @@ pub fn tokenize(input: &str) -> (Vec<Token>, Vec<ScanningError>) {
             continue;
         }
 
-        let mut next_scanner: Option<
-            fn(
-                &mut std::iter::Peekable<std::str::Chars<'_>>,
-                first_char: char,
-                current_line: usize,
-            ) -> Result<Token, ScanningError>,
-        > = None;
+        type Scanner = fn(
+            &mut std::iter::Peekable<std::str::Chars<'_>>,
+            first_char: char,
+            current_line: usize,
+        ) -> Result<Token, ScanningError>;
+
+        let mut next_scanner: Option<Scanner> = None;
 
         if c == '"' {
             next_scanner = Some(scan_string_literal);
@@ -268,7 +268,7 @@ fn scan_string_literal(
 ) -> Result<Token, ScanningError> {
     let mut quoted_string_literal = first_char.to_string();
     let mut terminated = false;
-    while let Some(c) = input_iterator.next() {
+    for c in &mut *input_iterator {
         quoted_string_literal.push(c);
         if c == '"' {
             terminated = true;
