@@ -1,7 +1,6 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    iter::zip,
-};
+use std::{cell::RefCell, collections::HashMap, iter::zip, rc::Rc};
+
+use std::fmt::Debug;
 
 use thiserror::Error;
 
@@ -19,106 +18,107 @@ pub enum RuntimeError {
     EarlyExit(Box<Value>),
 }
 
-pub type Environment = std::collections::HashMap<String, Value>;
-pub type ScopedEnvironment = std::collections::HashMap<(String, String), Value>;
+#[derive(Default)]
+pub struct Environment {
+    parent: Option<Rc<RefCell<Environment>>>,
+    values: HashMap<String, Value>,
+}
 
-#[derive(Debug, Clone)]
-pub struct Scope(String, Environment);
+impl Debug for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Environment")
+            .field(
+                "parent_addr",
+                &self.parent.as_ref().map(|this| this.as_ptr()),
+            )
+            .field("parent", &self.parent)
+            .field("values", &self.values)
+            .finish()
+    }
+}
 
 pub struct Interpreter {
     pub program: Program,
-    pub scopes_stack: VecDeque<(Scope, bool)>,
-    now: std::time::Instant,
+    pub current_environment: Rc<RefCell<Environment>>,
+}
+
+impl Environment {
+    pub fn new_with_builtin_functions(builtins: &[&str]) -> Self {
+        Self {
+            values: HashMap::from_iter(builtins.iter().map(|function| {
+                (
+                    function.to_string(),
+                    Value::Fn {
+                        name: function.to_string(),
+                        formal_args: vec![],
+                        body: Statement::Block(vec![]),
+                        environment: Default::default(),
+                    },
+                )
+            })),
+            parent: Default::default(),
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<Value> {
+        if let Some(value) = self.values.get(name) {
+            Some(value.clone())
+        } else if let Some(environment) = self.parent.as_ref() {
+            environment.borrow().get(name)
+        } else {
+            None
+        }
+    }
+
+    pub fn set(&mut self, name: &str, new_value: Value, new: bool) -> bool {
+        if new {
+            self.values.insert(name.to_string(), new_value);
+        } else if let Some(old_value) = self.values.get_mut(name) {
+            *old_value = new_value;
+        } else if let Some(environment) = &self.parent {
+            environment.borrow_mut().set(name, new_value, new);
+        } else {
+            return false;
+        }
+        true
+    }
 }
 
 impl Interpreter {
     pub fn new(program: Program) -> Self {
         Self {
-            scopes_stack: VecDeque::from(vec![(
-                Scope(
-                    "-1".into(),
-                    std::collections::HashMap::from([(
-                        "clock".to_string(),
-                        Value::Fn {
-                            name: "clock".to_string(),
-                            formal_args: vec![],
-                            body: Statement::Block(vec![], "0".into()),
-                            environment: HashMap::new(),
-                        },
-                    )]),
-                ),
-                true,
-            )]),
             program,
-            now: std::time::Instant::now(),
+            current_environment: Rc::new(RefCell::new(Environment::new_with_builtin_functions(&[
+                "clock",
+            ]))),
         }
     }
 
-    fn active_scopes(&self) -> impl DoubleEndedIterator<Item = &Scope> {
-        self.scopes_stack
-            .iter()
-            .filter_map(|(scope, active)| if *active { Some(scope) } else { None })
+    pub fn get_var(&self, name: &str) -> Option<Value> {
+        self.current_environment.borrow().get(name)
     }
 
-    fn active_scopes_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Scope> {
-        self.scopes_stack
-            .iter_mut()
-            .filter_map(|(scope, active)| if *active { Some(scope) } else { None })
+    // When adding the environment, we assume the caller owns the environment
+    pub fn add_environment(&mut self, mut environment: Environment) {
+        environment.parent = Some(self.current_environment.clone());
+        self.current_environment = Rc::new(RefCell::new(environment));
     }
 
-    pub fn get_var(&self, name: &str) -> Option<&Value> {
-        for Scope(_, environment) in self.active_scopes() {
-            if let Some(value) = environment.get(name) {
-                return Some(value);
-            }
-        }
-        None
+    pub fn set_environment(&mut self, environment: Rc<RefCell<Environment>>) {
+        self.current_environment = environment
     }
 
-    pub fn get_scoped_var(&self, name: &str) -> Option<(&String, &Value)> {
-        for Scope(scope, environment) in self.active_scopes() {
-            if let Some(value) = environment.get(name) {
-                return Some((scope, value));
-            }
-        }
-        None
-    }
-
-    pub fn get_var_mut(&mut self, name: &str) -> Option<&mut Value> {
-        for Scope(_, environment) in self.active_scopes_mut() {
-            if let Some(value) = environment.get_mut(name) {
-                return Some(value);
-            }
-        }
-        None
-    }
-
-    pub fn new_scope(&mut self, lexical_scope_id: &str) {
-        self.scopes_stack.push_front((
-            Scope(lexical_scope_id.into(), std::collections::HashMap::new()),
-            true,
-        ));
-    }
-
-    pub fn pop_scope(&mut self) -> Scope {
-        self.scopes_stack.pop_front().unwrap().0
+    // When giving back the environment, we can't assume the one we have this is the only reference
+    // to it (there may be other closures pointing to it)
+    pub fn pop_environment(&mut self) -> Rc<RefCell<Environment>> {
+        let return_value = self.current_environment.clone();
+        let new_env = self.current_environment.borrow().parent.clone().unwrap();
+        self.current_environment = new_env;
+        return_value
     }
 
     pub fn set_var(&mut self, name: &str, value: Value, new: bool) -> bool {
-        let latest_scope = self
-            .active_scopes_mut()
-            .next()
-            .expect("There should always be at least one scope");
-        if new {
-            latest_scope.1.insert(name.to_string(), value);
-            true
-        } else {
-            let Some(old_value) = self.get_var_mut(name) else {
-                return false;
-            };
-            *old_value = value;
-            true
-        }
+        self.current_environment.borrow_mut().set(name, value, new)
     }
 
     pub fn statement(&mut self, statement: &Statement) -> Result<(), RuntimeError> {
@@ -131,12 +131,12 @@ impl Interpreter {
                 println!("{}", &eval_expr(expr, self)?);
                 Ok(())
             }
-            Statement::Block(declarations, scope_id) => {
-                self.new_scope(scope_id);
+            Statement::Block(declarations) => {
+                self.add_environment(Environment::default());
                 for declaration in declarations.iter() {
                     self.declaration(declaration)?;
                 }
-                self.pop_scope();
+                self.pop_environment();
                 Ok(())
             }
             Statement::If(condition, if_statement, else_statement) => {
@@ -192,7 +192,7 @@ impl Interpreter {
                         name: name.lexeme.clone(),
                         formal_args: args.clone(),
                         body: body.clone(),
-                        environment: self.take_environment_snapshot(),
+                        environment: self.current_environment.clone(),
                     },
                     true,
                 );
@@ -215,7 +215,7 @@ impl Interpreter {
             name,
             formal_args,
             body,
-            environment: fn_environment,
+            environment,
         } = eval_expr(function_expr, self)?
         else {
             return eval_error(token, EvalErrorType::UndefinedFunction)?;
@@ -226,53 +226,39 @@ impl Interpreter {
                 EvalErrorType::WrongArgumentNumber(formal_args.len(), call_args.len()),
             )?;
         }
-        let Statement::Block(_, fn_lexical_scope_id) = body.clone() else {
+        let Statement::Block(_) = body.clone() else {
             todo!();
         };
-        let mut deactivated_scopes = vec![];
 
-        for (Scope(lexical_scope_id, _), active) in self.scopes_stack.iter_mut() {
-            if lexical_scope_id == "-1" {
-                continue;
-            }
-            if !fn_lexical_scope_id.starts_with(lexical_scope_id.as_str()) && *active {
-                *active = false;
-                deactivated_scopes.push(lexical_scope_id.to_string());
-            }
-        }
-        let sentinel = format!("sentinel_{}", self.now.elapsed().as_nanos());
-        // x_scope prefix_of y_scope = y_scope.starts_with(x_scope) = y is more specific than x
-        // unless there is a definition of that var that is lexically more specific that the var
-        // from the fn environment, add it
-        self.new_scope(&sentinel);
-        self.new_scope(&fn_lexical_scope_id);
-        for ((scope, var), value) in fn_environment {
-            let var_definition = self.get_scoped_var(&var);
-            if var_definition
-                .is_some_and(|(exisitng_var_scope_id, _)| exisitng_var_scope_id.starts_with(&scope))
-            {
-                continue;
-            }
-            self.set_var(&var, value, true);
-        }
+        let old_environment = self.current_environment.clone();
+        self.set_environment(environment);
+        let mut new_env = Environment::default();
         for (var_token, var_value) in zip(formal_args.clone(), call_args) {
-            self.set_var(&var_token.lexeme, var_value, true);
+            new_env.set(&var_token.lexeme, var_value, true);
         }
+        self.add_environment(new_env);
+
+        let env_before_running = self.current_environment.clone();
         let mut return_value = Value::Nil;
         match self.statement(&body) {
             Err(RuntimeError::EvalError(e)) => {
                 return Err(e);
             }
-            Err(RuntimeError::EarlyExit(val)) => return_value = *val,
+            Err(RuntimeError::EarlyExit(val)) => {
+                self.current_environment = env_before_running;
+                return_value = *val;
+            }
             _ => {}
         };
 
-        let new_env = self.take_environment_snapshot();
+        self.pop_environment();
+        let fn_environment = self.pop_environment();
+        self.current_environment = old_environment;
         if let Expr::Var(t) = function_expr {
             self.set_var(
                 &t.lexeme,
                 Value::Fn {
-                    environment: new_env,
+                    environment: fn_environment,
                     name,
                     formal_args,
                     body,
@@ -280,31 +266,7 @@ impl Interpreter {
                 false,
             );
         }
-        while self.scopes_stack.front().unwrap().0 .0 != sentinel {
-            self.pop_scope();
-        }
-        self.pop_scope();
-        let mut i = 0;
-        for (Scope(lexical_scope_id, _), active) in self.scopes_stack.iter_mut() {
-            if i >= deactivated_scopes.len() {
-                break;
-            }
-            if deactivated_scopes[i] == lexical_scope_id.as_str() && !*active {
-                *active = true;
-                i += 1;
-            }
-        }
 
         Ok(return_value)
-    }
-
-    fn take_environment_snapshot(&self) -> ScopedEnvironment {
-        let mut snapshot = HashMap::new();
-        for Scope(scope_id, env) in self.active_scopes() {
-            for (var, value) in env {
-                snapshot.insert((scope_id.clone(), var.to_string()), value.clone());
-            }
-        }
-        snapshot
     }
 }

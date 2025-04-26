@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use thiserror::Error;
 
 use crate::lexer::{Literal, Token, TokenType as TT};
@@ -8,9 +6,6 @@ pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
     current_token: Token,
-    current_scope_id: String,
-    current_scope_depth: usize,
-    scope_indices: HashMap<String, usize>,
 }
 
 macro_rules! next_token_matches {
@@ -87,9 +82,6 @@ impl Parser {
             tokens: tokens.to_vec(),
             position: 0,
             current_token: tokens[0].clone(), // There must be at least one token, the EOF one
-            current_scope_id: "0".into(),
-            current_scope_depth: 0,
-            scope_indices: HashMap::new(),
         }
     }
 
@@ -235,24 +227,6 @@ impl Parser {
         Ok(Ast::Expr(expr))
     }
 
-    fn new_scope(&mut self) -> (String, String) {
-        self.current_scope_depth += 1;
-        let current_scope_index = self
-            .scope_indices
-            .entry(self.current_scope_id.clone())
-            .and_modify(|x| *x += 1)
-            .or_insert(0);
-        let old_scope_id = self.current_scope_id.clone();
-        let new_scope_id = format!("{}.{current_scope_index}", self.current_scope_id);
-        self.current_scope_id = new_scope_id.clone();
-        (old_scope_id, new_scope_id)
-    }
-
-    fn restore_scope(&mut self, old_scope_id: &str) {
-        self.current_scope_depth -= 1;
-        self.current_scope_id = old_scope_id.to_string();
-    }
-
     pub fn statement(&mut self) -> Result<Statement, ParsingError> {
         let Some(Token {
             token_type, lexeme, ..
@@ -270,14 +244,12 @@ impl Parser {
             TT::LeftBrace => {
                 self.advance();
                 let mut statements = vec![];
-                let (old_scope_id, new_scope_id) = self.new_scope();
                 while !next_token_matches!(self, TT::RightBrace | TT::Eof) {
                     statements.push(self.declaration()?);
                 }
                 expect!(self, TT::RightBrace);
                 expect_semicolon = false;
-                self.restore_scope(&old_scope_id);
-                Ok(Statement::Block(statements, new_scope_id))
+                Ok(Statement::Block(statements))
             }
             TT::Keyword if lexeme == "if" || lexeme == "while" => {
                 self.advance();
@@ -334,24 +306,17 @@ impl Parser {
                 expect!(self, TT::RightParen);
                 let mut parsed_body = self.statement()?;
                 expect_semicolon = false;
-                let (old_scope_id, new_scope_id) = self.new_scope();
                 if let Some(increment) = increment {
-                    let (old_scope_id, new_scope_id) = self.new_scope();
-                    parsed_body = Statement::Block(
-                        vec![
-                            Declaration::Statement(parsed_body),
-                            Declaration::Statement(Statement::Expr(increment)),
-                        ],
-                        new_scope_id,
-                    );
-                    self.restore_scope(&old_scope_id);
+                    parsed_body = Statement::Block(vec![
+                        Declaration::Statement(parsed_body),
+                        Declaration::Statement(Statement::Expr(increment)),
+                    ]);
                 }
                 equivalent_statements.push(Declaration::Statement(Statement::While(
                     condition.unwrap_or(Expr::Literal(LiteralExpr::True)),
                     Box::new(parsed_body),
                 )));
-                self.restore_scope(&old_scope_id);
-                Ok(Statement::Block(equivalent_statements, new_scope_id))
+                Ok(Statement::Block(equivalent_statements))
             }
             TT::Keyword if lexeme == "return" => {
                 let return_token = expect!(self, TT::Keyword, "return").clone();
@@ -417,7 +382,7 @@ impl Parser {
         }
 
         expect!(self, TT::RightParen);
-        let body @ Statement::Block(_, _) = self.statement()? else {
+        let body @ Statement::Block(_) = self.statement()? else {
             return self.error(UnexpectedToken {
                 expected: "block".to_string(),
             });
@@ -443,10 +408,7 @@ impl Parser {
         while !next_token_matches!(self, TT::Eof) {
             declarations.push(self.declaration()?);
         }
-        Ok(Statement::Block(
-            declarations,
-            self.current_scope_id.clone(),
-        ))
+        Ok(Statement::Block(declarations))
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParsingError> {
@@ -476,7 +438,7 @@ pub enum Declaration {
 pub enum Statement {
     Expr(Expr),
     Print(Expr),
-    Block(Vec<Declaration>, String),
+    Block(Vec<Declaration>),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
     While(Expr, Box<Statement>),
     Return(Token, Option<Expr>),

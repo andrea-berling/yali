@@ -1,12 +1,14 @@
-use std::fmt::{Display, Formatter};
+use std::cell::RefCell;
+use std::fmt::{Debug, Display, Formatter};
+use std::rc::Rc;
 
 use thiserror::Error;
 
-use crate::interpreter::{Interpreter, ScopedEnvironment};
+use crate::interpreter::{Environment, Interpreter};
 use crate::lexer::{Token, TokenType};
 use crate::parser::{Ast, Expr, Statement};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -16,7 +18,7 @@ pub enum Value {
         name: String,
         formal_args: Vec<Token>,
         body: Statement,
-        environment: ScopedEnvironment,
+        environment: Rc<RefCell<Environment>>,
     },
 }
 
@@ -272,9 +274,6 @@ fn is_primitive(callee: &str) -> bool {
 
 pub fn eval_ast(ast: &Ast) -> Result<Value, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(
-            expr,
-            &mut Interpreter::new(Statement::Block(vec![], "0".to_string())),
-        ),
+        Ast::Expr(expr) => eval_expr(expr, &mut Interpreter::new(Statement::Block(vec![]))),
     }
 }
