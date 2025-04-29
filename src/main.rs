@@ -79,7 +79,7 @@ fn main() {
                         }
                         Err(err) => {
                             eprintln!("{err}");
-                            exit_code = 70;
+                            exit_code = 65;
                         }
                     },
                     Err(parsing_error) => {
