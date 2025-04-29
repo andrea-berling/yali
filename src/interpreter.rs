@@ -278,14 +278,21 @@ impl Interpreter {
         call_args: Vec<Value>,
         token: &Token,
     ) -> Result<Value, EvalError> {
+        let callee = eval_expr(function_expr, self)?;
         let Value::Fn {
             name,
             formal_args,
             body,
             environment,
-        } = eval_expr(function_expr, self)?
+        } = callee
         else {
-            return eval_error(token, EvalErrorType::UndefinedFunction)?;
+            if let class @ Value::Class { name, body } = &callee {
+                return Ok(Value::ClassInstance {
+                    class: Box::new(class.clone()),
+                });
+            } else {
+                return eval_error(token, EvalErrorType::UndefinedFunction)?;
+            }
         };
         if formal_args.len() != call_args.len() {
             return eval_error(

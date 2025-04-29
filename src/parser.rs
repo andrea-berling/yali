@@ -230,7 +230,13 @@ impl Parser {
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
         if let Ok(lhs) = self.lhs() {
             expect!(self, TT::Equal);
-            let assignment = self.assignment()?;
+            let assignment = if next_token_matches!(self, TT::Identifier)
+                && second_next_token_matches!(self, TT::LeftParen)
+            {
+                self.function_call()?
+            } else {
+                self.assignment()?
+            };
 
             Ok(Expr::Assign(Box::new(lhs), Box::new(assignment.clone())))
         } else {

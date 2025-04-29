@@ -25,6 +25,9 @@ pub enum Value {
         name: String,
         body: Statement,
     },
+    ClassInstance {
+        class: Box<Value>,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -80,6 +83,7 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Fn { name, .. } => write!(f, "<fn {name}>"),
             Value::Class { name, .. } => write!(f, "{name}"),
+            Value::ClassInstance { class } => write!(f, "{class} instance"),
         }
     }
 }
@@ -245,7 +249,9 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
             for expr in args {
                 call_args.push(eval_expr(expr, interpreter)?)
             }
-            let Ok(Value::Fn { name, .. }) = eval_expr(callee, interpreter) else {
+            let Ok(Value::Fn { name, .. } | Value::Class { name, .. }) =
+                eval_expr(callee, interpreter)
+            else {
                 return eval_error(token, UndefinedFunction);
             };
             if is_primitive(&name) {
