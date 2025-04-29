@@ -2,7 +2,7 @@ use crate::{
     lexer::Token,
     parser::{Declaration, Expr, Program, Statement},
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -124,11 +124,21 @@ impl Resolver {
                     return resolving_error(token, NameRebound);
                 }
                 self.declare(token);
+                let Statement::Block(body) = statement else {
+                    todo!()
+                };
                 self.add_scope();
+                let mut defined_args = HashSet::new();
                 for token in args {
+                    if defined_args.contains(&token.lexeme) {
+                        return resolving_error(token, NameRebound);
+                    }
+                    defined_args.insert(token.lexeme.clone());
                     self.define(token);
                 }
-                self.resolve_statement(statement)?;
+                for declaration in body {
+                    self.resolve_declaration(declaration)?;
+                }
                 self.pop_scope();
                 self.define(token);
             }

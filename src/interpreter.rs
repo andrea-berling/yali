@@ -282,7 +282,7 @@ impl Interpreter {
                 EvalErrorType::WrongArgumentNumber(formal_args.len(), call_args.len()),
             )?;
         }
-        let Statement::Block(_) = body.clone() else {
+        let Statement::Block(declarations) = body.clone() else {
             todo!();
         };
 
@@ -296,16 +296,19 @@ impl Interpreter {
 
         let env_before_running = self.current_environment.clone();
         let mut return_value = Value::Nil;
-        match self.statement(&body) {
-            Err(RuntimeError::EvalError(e)) => {
-                return Err(e);
-            }
-            Err(RuntimeError::EarlyExit(val)) => {
-                self.current_environment = env_before_running;
-                return_value = *val;
-            }
-            _ => {}
-        };
+        for declaration in &declarations {
+            match self.declaration(declaration) {
+                Err(RuntimeError::EvalError(e)) => {
+                    return Err(e);
+                }
+                Err(RuntimeError::EarlyExit(val)) => {
+                    self.current_environment = env_before_running.clone();
+                    return_value = *val;
+                    break;
+                }
+                _ => {}
+            };
+        }
 
         self.pop_environment();
         let fn_environment = self.pop_environment();
