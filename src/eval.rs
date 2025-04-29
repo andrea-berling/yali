@@ -21,6 +21,10 @@ pub enum Value {
         body: Statement,
         environment: Rc<RefCell<Environment>>,
     },
+    Class {
+        name: String,
+        body: Statement,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -75,6 +79,7 @@ impl Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
             Value::Fn { name, .. } => write!(f, "<fn {name}>"),
+            Value::Class { name, .. } => write!(f, "{name}"),
         }
     }
 }

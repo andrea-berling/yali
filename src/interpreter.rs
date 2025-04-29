@@ -254,6 +254,17 @@ impl Interpreter {
                 );
                 Ok(())
             }
+            Declaration::Class(name, body) => {
+                self.set_var(
+                    &name.lexeme,
+                    Value::Class {
+                        name: name.lexeme.clone(),
+                        body: body.clone(),
+                    },
+                    true,
+                );
+                Ok(())
+            }
         }
     }
 

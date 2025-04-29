@@ -149,6 +149,9 @@ impl Resolver {
                 self.in_function_scope = old_in_function_scope;
                 self.define(token);
             }
+            Declaration::Class(token, _statement) => {
+                self.define(token);
+            }
         }
         Ok(())
     }

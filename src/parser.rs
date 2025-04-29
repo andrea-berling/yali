@@ -427,11 +427,26 @@ impl Parser {
         Ok(Declaration::Function(identifier_token, arguments, body))
     }
 
+    pub fn class_declaration(&mut self) -> Result<Declaration, ParsingError> {
+        expect!(self, TT::Keyword, "class");
+        let identifier_token = expect!(self, TT::Identifier).clone();
+
+        let body @ Statement::Block(_) = self.statement()? else {
+            return self.error(UnexpectedToken {
+                expected: "block".to_string(),
+            });
+        };
+
+        Ok(Declaration::Class(identifier_token, body))
+    }
+
     pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
         if next_token_matches!(self, TT::Keyword, "var") {
             Ok(self.var_declaration()?)
         } else if next_token_matches!(self, TT::Keyword, "fun") {
             Ok(self.fun_declaration()?)
+        } else if next_token_matches!(self, TT::Keyword, "class") {
+            Ok(self.class_declaration()?)
         } else if self.peek().is_some() {
             Ok(Declaration::Statement(self.statement()?))
         } else {
@@ -468,6 +483,7 @@ pub enum Declaration {
     Var(Token, Option<Expr>),
     Statement(Statement),
     Function(Token, Vec<Token>, Statement),
+    Class(Token, Statement),
 }
 
 #[derive(Clone, Debug)]
