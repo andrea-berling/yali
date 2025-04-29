@@ -13,6 +13,8 @@ pub enum ResolvingErrorType {
     NameRebound,
     #[error("The referenced name is still being defined")]
     InconsistentReference,
+    #[error("Return statements are only allowed within function bodies")]
+    InvalidReturn,
 }
 
 use ResolvingErrorType::*;
@@ -36,6 +38,7 @@ type Scope = HashMap<String, bool>;
 pub struct Resolver {
     resolved_expressions: HashMap<String, usize>,
     scopes: VecDeque<Scope>,
+    in_function_scope: bool,
 }
 
 impl Resolver {
@@ -43,6 +46,7 @@ impl Resolver {
         Self {
             resolved_expressions: HashMap::new(),
             scopes: VecDeque::new(),
+            in_function_scope: false,
         }
     }
 
@@ -128,6 +132,8 @@ impl Resolver {
                     todo!()
                 };
                 self.add_scope();
+                let old_in_function_scope = self.in_function_scope;
+                self.in_function_scope = true;
                 let mut defined_args = HashSet::new();
                 for token in args {
                     if defined_args.contains(&token.lexeme) {
@@ -140,6 +146,7 @@ impl Resolver {
                     self.resolve_declaration(declaration)?;
                 }
                 self.pop_scope();
+                self.in_function_scope = old_in_function_scope;
                 self.define(token);
             }
         }
@@ -202,7 +209,10 @@ impl Resolver {
                 self.resolve_expr(condition)?;
                 self.resolve_statement(body)?;
             }
-            Statement::Return(_, expr) => {
+            Statement::Return(t, expr) => {
+                if !self.in_function_scope {
+                    return resolving_error(t, InvalidReturn);
+                }
                 if let Some(expr) = expr {
                     self.resolve_expr(expr)?;
                 }
