@@ -6,6 +6,8 @@ pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
     current_token: Token,
+    current_address_prefix: String,
+    current_address_index: usize,
 }
 
 macro_rules! next_token_matches {
@@ -82,6 +84,8 @@ impl Parser {
             tokens: tokens.to_vec(),
             position: 0,
             current_token: tokens[0].clone(), // There must be at least one token, the EOF one
+            current_address_prefix: "".to_string(),
+            current_address_index: 0,
         }
     }
 
@@ -147,7 +151,17 @@ impl Parser {
                 expect!(self, TT::RightParen);
                 Ok(Expr::Grouping(Box::new(expr)))
             }
-            (TT::Identifier, _) => Ok(Expr::Var(token.clone())),
+            (TT::Identifier, _) => {
+                let return_value = Ok(Expr::Name(
+                    token.clone(),
+                    format!(
+                        "{}{}",
+                        self.current_address_prefix, self.current_address_index
+                    ),
+                ));
+                self.current_address_index += 1;
+                return_value
+            }
             _ => self.error(UnexpectedToken {
                 expected: "expression".to_string(),
             }),
@@ -195,17 +209,30 @@ impl Parser {
         factor = chain of unary joined by TT::Slash | TT::Star
     }
 
-    fn assignment(&mut self) -> Result<Expr, ParsingError> {
-        // FIX: this is going to break when we start having expressions as lhs
+    fn lhs(&mut self) -> Result<Expr, ParsingError> {
         if next_token_matches!(self, TT::Identifier) && second_next_token_matches!(self, TT::Equal)
         {
             let identifier_token = self.advance().unwrap().clone();
+            let return_value = Ok(Expr::Name(
+                identifier_token.clone(),
+                format!(
+                    "{}{}",
+                    self.current_address_prefix, self.current_address_index
+                ),
+            ));
+            self.current_address_index += 1;
+            return_value
+        } else {
+            self.error(InvalidLhs)
+        }
+    }
+
+    fn assignment(&mut self) -> Result<Expr, ParsingError> {
+        if let Ok(lhs) = self.lhs() {
             expect!(self, TT::Equal);
             let assignment = self.assignment()?;
-            Ok(Expr::Assign(
-                identifier_token.clone(),
-                Box::new(assignment.clone()),
-            ))
+
+            Ok(Expr::Assign(Box::new(lhs), Box::new(assignment.clone())))
         } else {
             self.logic_or()
         }
@@ -242,13 +269,22 @@ impl Parser {
                 Ok(Statement::Print(expr))
             }
             TT::LeftBrace => {
-                self.advance();
+                expect!(self, TT::LeftBrace);
+                let current_index = self.current_address_index;
+                let previous_address_prefix = self.current_address_prefix.clone();
+                self.current_address_prefix = format!(
+                    "{}{}.",
+                    self.current_address_prefix, self.current_address_index
+                );
+                self.current_address_index = 0;
                 let mut statements = vec![];
                 while !next_token_matches!(self, TT::RightBrace | TT::Eof) {
                     statements.push(self.declaration()?);
                 }
                 expect!(self, TT::RightBrace);
                 expect_semicolon = false;
+                self.current_address_index = current_index + 1;
+                self.current_address_prefix = previous_address_prefix;
                 Ok(Statement::Block(statements))
             }
             TT::Keyword if lexeme == "if" || lexeme == "while" => {
@@ -450,8 +486,8 @@ pub enum Expr {
     Unary(Token, Box<Expr>),
     Binary(Box<Expr>, Token, Box<Expr>),
     Grouping(Box<Expr>),
-    Var(Token),
-    Assign(Token, Box<Expr>),
+    Name(Token, String),
+    Assign(Box<Expr>, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
     FnCall(Box<Expr>, Token, Vec<Expr>),
 }
@@ -474,6 +510,8 @@ pub enum ParsingErrorType {
     NothingToParse,
     #[error("Expected {expected}")]
     UnexpectedToken { expected: String },
+    #[error("Invalid epxression on the left side of '='")]
+    InvalidLhs,
 }
 
 use ParsingErrorType::*;
@@ -507,7 +545,7 @@ pub trait Visit {
                 self.visit_expr(*expr1);
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
-            Expr::Var(_) => todo!(),
+            Expr::Name(_, _) => todo!(),
             Expr::Assign(_token, _expr) => todo!(),
             Expr::Logical(_expr, _token, _expr1) => todo!(),
             Expr::FnCall(_expr, _token, _vec) => todo!(),
@@ -571,11 +609,12 @@ impl Visit for AstPrinter {
                 print!(")");
             }
             Expr::Grouping(expr) => self.visit_grouping(*expr),
-            Expr::Var(token) => {
+            Expr::Name(token, _) => {
                 print!("{}", token.lexeme)
             }
-            Expr::Assign(token, expr) => {
-                print!("{} = ", token.lexeme);
+            Expr::Assign(lhs, expr) => {
+                self.visit_expr(*lhs);
+                print!(" = ");
                 self.visit_expr(*expr)
             }
             Expr::Logical(expr1, token, expr2) => {

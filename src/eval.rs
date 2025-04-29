@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::rc::Rc;
 
@@ -205,20 +206,23 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
             _ => eval_error(token, IvalidOperator),
         },
         Expr::Grouping(expr) => eval_expr(expr, interpreter),
-        Expr::Var(token) => {
-            if let Some(value) = interpreter.get_var(&token.lexeme) {
+        Expr::Name(token, address) => {
+            if let Some(value) = interpreter.get_var_by_address(token, address) {
                 Ok(value.clone())
             } else {
                 eval_error(token, UndefinedVariableOrFunction)
             }
         }
-        Expr::Assign(token, expr) => {
-            let result = eval_expr(expr, interpreter)?;
-            if !interpreter.set_var(&token.lexeme, result.clone(), false) {
-                return eval_error(token, UndefinedVariable);
+        Expr::Assign(lhs, expr) => match **lhs {
+            Expr::Name(ref token, ref address) => {
+                let result = eval_expr(expr, interpreter)?;
+                if !interpreter.assign_var(token, address, result.clone()) {
+                    return eval_error(token, UndefinedVariable);
+                }
+                Ok(result)
             }
-            Ok(result)
-        }
+            _ => todo!("Invalid assingee"),
+        },
         Expr::Logical(expr1, operator, expr2) => {
             let result1 = eval_expr(expr1, interpreter)?;
             match (result1.clone(), operator.lexeme.as_str()) {
@@ -274,6 +278,9 @@ fn is_primitive(callee: &str) -> bool {
 
 pub fn eval_ast(ast: &Ast) -> Result<Value, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(expr, &mut Interpreter::new(Statement::Block(vec![]))),
+        Ast::Expr(expr) => eval_expr(
+            expr,
+            &mut Interpreter::new(&Statement::Block(vec![]), HashMap::new()),
+        ),
     }
 }

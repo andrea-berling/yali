@@ -40,6 +40,8 @@ impl Debug for Environment {
 pub struct Interpreter {
     pub program: Program,
     pub current_environment: Rc<RefCell<Environment>>,
+    pub n_environments: usize,
+    pub resolution_table: HashMap<String, usize>,
 }
 
 impl Environment {
@@ -85,27 +87,46 @@ impl Environment {
 }
 
 impl Interpreter {
-    pub fn new(program: Program) -> Self {
+    pub fn new(program: &Program, resolution_table: HashMap<String, usize>) -> Self {
         Self {
-            program,
+            program: program.clone(),
             current_environment: Rc::new(RefCell::new(Environment::new_with_builtin_functions(&[
                 "clock",
             ]))),
+            resolution_table,
+            n_environments: 0,
         }
     }
 
-    pub fn get_var(&self, name: &str) -> Option<Value> {
-        self.current_environment.borrow().get(name)
+    pub fn get_var_by_address(&self, token: &Token, address: &str) -> Option<Value> {
+        let depth = match self.resolution_table.get(address) {
+            Some(depth) => *depth,
+            None => usize::MAX,
+        };
+
+        self.get_var_at_depth(&token.lexeme, depth)
+    }
+
+    fn environment_chain_length(&self) -> usize {
+        let mut n_envs = 0;
+        let mut curr_env = self.current_environment.clone();
+        while let Some(parent_env) = &curr_env.clone().borrow().parent {
+            n_envs += 1;
+            curr_env = parent_env.clone();
+        }
+        n_envs
     }
 
     // When adding the environment, we assume the caller owns the environment
     pub fn add_environment(&mut self, mut environment: Environment) {
         environment.parent = Some(self.current_environment.clone());
         self.current_environment = Rc::new(RefCell::new(environment));
+        self.n_environments += 1;
     }
 
     pub fn set_environment(&mut self, environment: Rc<RefCell<Environment>>) {
-        self.current_environment = environment
+        self.current_environment = environment;
+        self.n_environments = self.environment_chain_length()
     }
 
     // When giving back the environment, we can't assume the one we have this is the only reference
@@ -114,11 +135,46 @@ impl Interpreter {
         let return_value = self.current_environment.clone();
         let new_env = self.current_environment.borrow().parent.clone().unwrap();
         self.current_environment = new_env;
+        self.n_environments -= 1;
         return_value
     }
 
     pub fn set_var(&mut self, name: &str, value: Value, new: bool) -> bool {
         self.current_environment.borrow_mut().set(name, value, new)
+    }
+
+    fn find_environment(&self, depth: usize) -> Rc<RefCell<Environment>> {
+        let mut return_value = self.current_environment.clone();
+        let mut depth = depth.min(self.n_environments - 1);
+        while depth > 0 {
+            return_value = match &return_value.clone().borrow().parent {
+                Some(parent) => parent.clone(),
+                None => return_value,
+            };
+            if return_value.borrow().parent.is_none() {
+                break;
+            }
+            depth -= 1
+        }
+        return_value
+    }
+
+    fn set_var_at_depth(&mut self, name: &str, value: Value, depth: usize) -> bool {
+        self.find_environment(depth)
+            .borrow_mut()
+            .set(name, value, false)
+    }
+
+    fn get_var_at_depth(&self, name: &str, depth: usize) -> Option<Value> {
+        self.find_environment(depth).borrow().get(name)
+    }
+
+    pub fn assign_var(&mut self, token: &Token, address: &str, value: Value) -> bool {
+        let depth = match self.resolution_table.get(address) {
+            Some(depth) => *depth,
+            None => usize::MAX,
+        };
+        self.set_var_at_depth(&token.lexeme, value, depth)
     }
 
     pub fn statement(&mut self, statement: &Statement) -> Result<(), RuntimeError> {
@@ -253,17 +309,17 @@ impl Interpreter {
 
         self.pop_environment();
         let fn_environment = self.pop_environment();
-        self.current_environment = old_environment;
-        if let Expr::Var(t) = function_expr {
-            self.set_var(
-                &t.lexeme,
+        self.set_environment(old_environment);
+        if let Expr::Name(ref t, ref address) = function_expr {
+            self.assign_var(
+                t,
+                address,
                 Value::Fn {
                     environment: fn_environment,
                     name,
                     formal_args,
                     body,
                 },
-                false,
             );
         }
 

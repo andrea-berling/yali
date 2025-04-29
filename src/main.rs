@@ -5,11 +5,13 @@ mod eval;
 mod interpreter;
 mod lexer;
 mod parser;
+mod resolve;
 
 use eval::eval_ast;
 use interpreter::Interpreter;
 use lexer::tokenize;
 use parser::{AstPrinter, Visit};
+use resolve::Resolver;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -68,12 +70,18 @@ fn main() {
                     }
                 },
                 "run" => match parser.parse_program() {
-                    Ok(program) => {
-                        if let Err(err) = Interpreter::new(program.clone()).run() {
+                    Ok(program) => match Resolver::new().resolve(&program) {
+                        Ok(resolution_table) => {
+                            if let Err(err) = Interpreter::new(&program, resolution_table).run() {
+                                eprintln!("{err}");
+                                exit_code = 70;
+                            }
+                        }
+                        Err(err) => {
                             eprintln!("{err}");
                             exit_code = 70;
                         }
-                    }
+                    },
                     Err(parsing_error) => {
                         eprintln!("{parsing_error}");
                         exit_code = 65;
