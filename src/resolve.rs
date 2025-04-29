@@ -185,6 +185,7 @@ impl Resolver {
                     self.resolve_expr(expr)?;
                 }
             }
+            Expr::FieldAccess(token, exprs) => self.resolve_expr(&exprs[0])?,
         }
         Ok(())
     }

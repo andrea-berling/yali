@@ -152,15 +152,28 @@ impl Parser {
                 Ok(Expr::Grouping(Box::new(expr)))
             }
             (TT::Identifier, _) => {
-                let return_value = Ok(Expr::Name(
+                let token = token.clone();
+                let first_name = Expr::Name(
                     token.clone(),
                     format!(
                         "{}{}",
                         self.current_address_prefix, self.current_address_index
                     ),
-                ));
+                );
                 self.current_address_index += 1;
-                return_value
+                let mut names = vec![first_name.clone()];
+                while next_token_matches!(self, TT::Dot) {
+                    expect!(self, TT::Dot);
+                    names.push(Expr::Name(
+                        expect!(self, TT::Identifier).clone(),
+                        "".to_string(),
+                    ));
+                }
+                if names.len() > 1 {
+                    Ok(Expr::FieldAccess(token, names))
+                } else {
+                    Ok(first_name)
+                }
             }
             _ => self.error(UnexpectedToken {
                 expected: "expression".to_string(),
@@ -210,37 +223,59 @@ impl Parser {
     }
 
     fn lhs(&mut self) -> Result<Expr, ParsingError> {
-        if next_token_matches!(self, TT::Identifier) && second_next_token_matches!(self, TT::Equal)
+        if next_token_matches!(self, TT::Identifier)
+            && second_next_token_matches!(self, TT::Dot | TT::Equal)
         {
             let identifier_token = self.advance().unwrap().clone();
-            let return_value = Ok(Expr::Name(
+            let first_name = Expr::Name(
                 identifier_token.clone(),
                 format!(
                     "{}{}",
                     self.current_address_prefix, self.current_address_index
                 ),
-            ));
+            );
             self.current_address_index += 1;
-            return_value
+            let mut names = vec![first_name.clone()];
+            while next_token_matches!(self, TT::Dot) {
+                expect!(self, TT::Dot);
+                names.push(Expr::Name(
+                    expect!(self, TT::Identifier).clone(),
+                    "".to_string(),
+                ));
+            }
+            let return_value = if names.len() > 1 {
+                Expr::FieldAccess(identifier_token, names)
+            } else {
+                first_name
+            };
+            if !next_token_matches!(self, TT::Equal) {
+                return self.error(InvalidLhs(Some(return_value)));
+            }
+            Ok(return_value)
         } else {
-            self.error(InvalidLhs)
+            self.error(InvalidLhs(None))
         }
     }
 
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
-        if let Ok(lhs) = self.lhs() {
-            expect!(self, TT::Equal);
-            let assignment = if next_token_matches!(self, TT::Identifier)
-                && second_next_token_matches!(self, TT::LeftParen)
-            {
-                self.function_call()?
-            } else {
-                self.assignment()?
-            };
+        match self.lhs() {
+            Ok(lhs) => {
+                expect!(self, TT::Equal);
+                let assignment = if next_token_matches!(self, TT::Identifier)
+                    && second_next_token_matches!(self, TT::LeftParen)
+                {
+                    self.function_call()?
+                } else {
+                    self.assignment()?
+                };
 
-            Ok(Expr::Assign(Box::new(lhs), Box::new(assignment.clone())))
-        } else {
-            self.logic_or()
+                Ok(Expr::Assign(Box::new(lhs), Box::new(assignment.clone())))
+            }
+            Err(ParsingError {
+                error: InvalidLhs(Some(expr)),
+                ..
+            }) => Ok(expr),
+            _ => self.logic_or(),
         }
     }
 
@@ -512,6 +547,7 @@ pub enum Expr {
     Assign(Box<Expr>, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
     FnCall(Box<Expr>, Token, Vec<Expr>),
+    FieldAccess(Token, Vec<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -533,7 +569,7 @@ pub enum ParsingErrorType {
     #[error("Expected {expected}")]
     UnexpectedToken { expected: String },
     #[error("Invalid epxression on the left side of '='")]
-    InvalidLhs,
+    InvalidLhs(Option<Expr>),
 }
 
 use ParsingErrorType::*;
@@ -571,6 +607,7 @@ pub trait Visit {
             Expr::Assign(_token, _expr) => todo!(),
             Expr::Logical(_expr, _token, _expr1) => todo!(),
             Expr::FnCall(_expr, _token, _vec) => todo!(),
+            Expr::FieldAccess(token, exprs) => todo!(),
         }
     }
 
@@ -645,6 +682,7 @@ impl Visit for AstPrinter {
                 self.visit_expr(*expr2);
             }
             Expr::FnCall(_expr, _token, _vec) => todo!(),
+            Expr::FieldAccess(exprs, _) => todo!(),
         }
     }
 }

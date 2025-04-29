@@ -27,6 +27,7 @@ pub enum Value {
     },
     ClassInstance {
         class: Box<Value>,
+        properties: HashMap<String, Value>,
     },
 }
 
@@ -50,6 +51,10 @@ pub enum EvalErrorType {
     UndefinedFunction,
     #[error("Wrong argument number: expected {0}, got {1}")]
     WrongArgumentNumber(usize, usize),
+    #[error("Invalid field access")]
+    InvalidFieldAccess,
+    #[error("Undefined field")]
+    UndefinedField,
 }
 
 use EvalErrorType::*;
@@ -83,7 +88,7 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Fn { name, .. } => write!(f, "<fn {name}>"),
             Value::Class { name, .. } => write!(f, "{name}"),
-            Value::ClassInstance { class } => write!(f, "{class} instance"),
+            Value::ClassInstance { class, .. } => write!(f, "{class} instance"),
         }
     }
 }
@@ -230,6 +235,29 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 }
                 Ok(result)
             }
+            Expr::FieldAccess(ref token, ref names) => {
+                let Expr::Name(ref first_name_token, ref address) = names[0] else {
+                    todo!()
+                };
+                let mut first_name = eval_expr(&names[0], interpreter)?;
+                let Expr::Name(ref field_token, _) = names[1] else {
+                    return eval_error(token, InvalidFieldAccess);
+                };
+
+                let rhs = eval_expr(expr, interpreter)?;
+                if let Value::ClassInstance {
+                    ref mut properties, ..
+                } = &mut first_name
+                {
+                    properties.insert(field_token.lexeme.clone(), rhs);
+                } else {
+                    todo!()
+                }
+                if !interpreter.assign_var(first_name_token, address, first_name.clone()) {
+                    return eval_error(first_name_token, UndefinedVariable);
+                }
+                Ok(first_name.clone())
+            }
             _ => todo!("Invalid assingee"),
         },
         Expr::Logical(expr1, operator, expr2) => {
@@ -247,7 +275,7 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
         Expr::FnCall(callee, token, args) => {
             let mut call_args = vec![];
             for expr in args {
-                call_args.push(eval_expr(expr, interpreter)?)
+                call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
             }
             let Ok(Value::Fn { name, .. } | Value::Class { name, .. }) =
                 eval_expr(callee, interpreter)
@@ -255,19 +283,28 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 return eval_error(token, UndefinedFunction);
             };
             if is_primitive(&name) {
-                eval_primitive_function(&name, token, call_args)
+                eval_primitive_function(&name, token)
             } else {
                 interpreter.call_function(callee, call_args, token)
+            }
+        }
+        Expr::FieldAccess(token, ref names) => {
+            let Value::ClassInstance { class, properties } = eval_expr(&names[0], interpreter)?
+            else {
+                return eval_error(token, UndefinedFunction);
+            };
+            let Expr::Name(ref token, _) = names[1] else {
+                return eval_error(token, InvalidFieldAccess);
+            };
+            match properties.get(&token.lexeme) {
+                Some(val) => Ok(val.clone()),
+                None => eval_error(&token, UndefinedField),
             }
         }
     }
 }
 
-fn eval_primitive_function(
-    callee: &str,
-    token: &Token,
-    _vec: Vec<Value>,
-) -> Result<Value, EvalError> {
+fn eval_primitive_function(callee: &str, token: &Token) -> Result<Value, EvalError> {
     match callee {
         "clock" => Ok(Value::Number(
             std::time::SystemTime::now()

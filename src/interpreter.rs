@@ -169,6 +169,10 @@ impl Interpreter {
         self.find_environment(depth).borrow().get(name)
     }
 
+    fn get_var(&self, name: &str) -> Option<Value> {
+        self.current_environment.borrow().get(name)
+    }
+
     pub fn assign_var(&mut self, token: &Token, address: &str, value: Value) -> bool {
         let depth = match self.resolution_table.get(address) {
             Some(depth) => *depth,
@@ -275,7 +279,7 @@ impl Interpreter {
     pub fn call_function(
         &mut self,
         function_expr: &Expr,
-        call_args: Vec<Value>,
+        call_args: Vec<(Expr, Value)>,
         token: &Token,
     ) -> Result<Value, EvalError> {
         let callee = eval_expr(function_expr, self)?;
@@ -289,6 +293,7 @@ impl Interpreter {
             if let class @ Value::Class { name, body } = &callee {
                 return Ok(Value::ClassInstance {
                     class: Box::new(class.clone()),
+                    properties: HashMap::new(),
                 });
             } else {
                 return eval_error(token, EvalErrorType::UndefinedFunction)?;
@@ -307,7 +312,14 @@ impl Interpreter {
         let old_environment = self.current_environment.clone();
         self.set_environment(environment);
         let mut new_env = Environment::default();
-        for (var_token, var_value) in zip(formal_args.clone(), call_args) {
+        for (var_token, var_value) in zip(
+            formal_args.clone(),
+            call_args
+                .iter()
+                .cloned()
+                .unzip::<Expr, Value, Vec<_>, Vec<_>>()
+                .1,
+        ) {
             new_env.set(&var_token.lexeme, var_value, true);
         }
         self.add_environment(new_env);
@@ -328,6 +340,21 @@ impl Interpreter {
             };
         }
 
+        let mut values_to_update = vec![];
+
+        for (expr, formal_arg) in zip(
+            call_args
+                .iter()
+                .cloned()
+                .unzip::<Expr, Value, Vec<_>, Vec<_>>()
+                .0,
+            formal_args.clone(),
+        ) {
+            if let Some(val @ Value::ClassInstance { .. }) = self.get_var(&formal_arg.lexeme) {
+                values_to_update.push((expr, val.clone()));
+            }
+        }
+
         self.pop_environment();
         let fn_environment = self.pop_environment();
         self.set_environment(old_environment);
@@ -342,6 +369,16 @@ impl Interpreter {
                     body,
                 },
             );
+        }
+
+        for (expr, value) in values_to_update {
+            if let Expr::Name(token, address) = expr {
+                self.assign_var(&token, &address, value);
+            } else if let Expr::FieldAccess(_, names) = expr {
+                if let Expr::Name(token, address) = &names[0] {
+                    self.assign_var(token, address, value);
+                }
+            }
         }
 
         Ok(return_value)
