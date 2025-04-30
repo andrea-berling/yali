@@ -100,6 +100,17 @@ impl Parser {
         }
     }
 
+    fn set_position(&mut self, pos: usize) -> bool {
+        if pos < self.tokens.len() {
+            let token = &self.tokens[pos];
+            self.position = pos;
+            self.current_token = token.clone();
+            true
+        } else {
+            false
+        }
+    }
+
     fn error<T>(&self, error_type: ParsingErrorType) -> Result<T, ParsingError> {
         Err(ParsingError::new(self.current_token.clone(), error_type))
     }
@@ -161,19 +172,7 @@ impl Parser {
                     ),
                 );
                 self.current_address_index += 1;
-                let mut names = vec![first_name.clone()];
-                while next_token_matches!(self, TT::Dot) {
-                    expect!(self, TT::Dot);
-                    names.push(Expr::Name(
-                        expect!(self, TT::Identifier).clone(),
-                        "".to_string(),
-                    ));
-                }
-                if names.len() > 1 {
-                    Ok(Expr::FieldAccess(token, names))
-                } else {
-                    Ok(first_name)
-                }
+                Ok(first_name)
             }
             _ => self.error(UnexpectedToken {
                 expected: "expression".to_string(),
@@ -190,18 +189,34 @@ impl Parser {
         Ok(arguments)
     }
 
-    fn function_call(&mut self) -> Result<Expr, ParsingError> {
-        let mut callee = self.primary()?;
+    fn call_or_ident(
+        &mut self,
+        no_grouping: bool,
+        no_literals: bool,
+    ) -> Result<Expr, ParsingError> {
+        let mut call_or_ident = self.primary()?;
+        if let Expr::Literal(_) = call_or_ident {
+            if no_literals {
+                return self.error(UnexpectedToken {
+                    expected: "any expression other than a literal".into(),
+                });
+            }
+        }
+        if let Expr::Grouping(_) = call_or_ident {
+            if no_grouping {
+                todo!("No grouping allowed");
+            }
+        }
         while next_token_matches!(self, TT::LeftParen) {
-            let lparen = self.advance().unwrap().clone();
             let mut arguments: Vec<Expr> = vec![];
+            let lparen = expect!(self, TT::LeftParen).clone();
             if !next_token_matches!(self, TT::RightParen) {
                 arguments.append(&mut self.arguments()?);
             }
             expect!(self, TT::RightParen);
-            callee = Expr::FnCall(Box::new(callee), lparen, arguments)
+            call_or_ident = Expr::Call(Box::new(call_or_ident), lparen, arguments.clone());
         }
-        Ok(callee)
+        Ok(call_or_ident)
     }
 
     fn unary(&mut self) -> Result<Expr, ParsingError> {
@@ -209,7 +224,18 @@ impl Parser {
             let operator = self.advance().unwrap().clone();
             Ok(Expr::Unary(operator, Box::new(self.unary()?)))
         } else {
-            self.function_call()
+            let previous_position = self.position;
+            if let Err(ParsingError {
+                error: InvalidLhs(Some(expr)),
+                ..
+            }) = self.lhs()
+            {
+                Ok(expr)
+            } else {
+                // TODO: revise
+                self.set_position(previous_position);
+                self.call_or_ident(false, false)
+            }
         }
     }
 
@@ -224,47 +250,35 @@ impl Parser {
 
     fn lhs(&mut self) -> Result<Expr, ParsingError> {
         if next_token_matches!(self, TT::Identifier)
-            && second_next_token_matches!(self, TT::Dot | TT::Equal)
+            && second_next_token_matches!(self, TT::Dot | TT::LeftParen | TT::Equal)
         {
-            let identifier_token = self.advance().unwrap().clone();
-            let first_name = Expr::Name(
-                identifier_token.clone(),
-                format!(
-                    "{}{}",
-                    self.current_address_prefix, self.current_address_index
-                ),
-            );
-            self.current_address_index += 1;
-            let mut names = vec![first_name.clone()];
+            let mut expr = self.call_or_ident(true, true)?;
             while next_token_matches!(self, TT::Dot) {
-                expect!(self, TT::Dot);
-                names.push(Expr::Name(
-                    expect!(self, TT::Identifier).clone(),
-                    "".to_string(),
-                ));
+                let dot = expect!(self, TT::Dot).clone();
+                expr = Expr::Dotted(
+                    dot,
+                    Box::new(expr),
+                    Box::new(self.call_or_ident(false, true)?),
+                )
             }
-            let return_value = if names.len() > 1 {
-                Expr::FieldAccess(identifier_token, names)
-            } else {
-                first_name
-            };
             if !next_token_matches!(self, TT::Equal) {
-                return self.error(InvalidLhs(Some(return_value)));
+                return self.error(InvalidLhs(Some(expr)));
             }
-            Ok(return_value)
+            Ok(expr)
         } else {
             self.error(InvalidLhs(None))
         }
     }
 
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
+        let previous_position = self.position;
         match self.lhs() {
             Ok(lhs) => {
                 expect!(self, TT::Equal);
                 let assignment = if next_token_matches!(self, TT::Identifier)
                     && second_next_token_matches!(self, TT::LeftParen)
                 {
-                    self.function_call()?
+                    self.call_or_ident(false, false)?
                 } else {
                     self.assignment()?
                 };
@@ -274,7 +288,28 @@ impl Parser {
             Err(ParsingError {
                 error: InvalidLhs(Some(expr)),
                 ..
-            }) => Ok(expr),
+            }) => {
+                if next_token_matches!(
+                    self,
+                    TT::Plus
+                        | TT::Minus
+                        | TT::Slash
+                        | TT::Star
+                        | TT::BangEqual
+                        | TT::EqualEqual
+                        | TT::Greater
+                        | TT::GreaterEqual
+                        | TT::Less
+                        | TT::LessEqual
+                ) || next_token_matches!(self, TT::Keyword, "or")
+                    || next_token_matches!(self, TT::Keyword, "and")
+                {
+                    self.set_position(previous_position);
+                    self.logic_or()
+                } else {
+                    Ok(expr)
+                }
+            }
             _ => self.logic_or(),
         }
     }
@@ -305,7 +340,7 @@ impl Parser {
         let mut expect_semicolon = true;
         let return_value = match token_type {
             TT::Keyword if lexeme == "print" => {
-                self.advance();
+                expect!(self, TT::Keyword, "print");
                 let expr = self.expr()?;
                 Ok(Statement::Print(expr))
             }
@@ -444,8 +479,13 @@ impl Parser {
         Ok(Declaration::Var(identifier_token, expression))
     }
 
-    pub fn fun_declaration(&mut self) -> Result<Declaration, ParsingError> {
-        expect!(self, TT::Keyword, "fun");
+    pub fn fun_or_method_declaration(
+        &mut self,
+        is_method: bool,
+    ) -> Result<Declaration, ParsingError> {
+        if !is_method {
+            expect!(self, TT::Keyword, "fun");
+        }
         let identifier_token = expect!(self, TT::Identifier).clone();
 
         let mut arguments = vec![];
@@ -471,21 +511,21 @@ impl Parser {
     pub fn class_declaration(&mut self) -> Result<Declaration, ParsingError> {
         expect!(self, TT::Keyword, "class");
         let identifier_token = expect!(self, TT::Identifier).clone();
+        expect!(self, TT::LeftBrace);
+        let mut body = Vec::new();
+        while !next_token_matches!(self, TT::RightBrace) {
+            body.push(self.fun_or_method_declaration(true)?);
+        }
+        expect!(self, TT::RightBrace);
 
-        let body @ Statement::Block(_) = self.statement()? else {
-            return self.error(UnexpectedToken {
-                expected: "block".to_string(),
-            });
-        };
-
-        Ok(Declaration::Class(identifier_token, body))
+        Ok(Declaration::Class(identifier_token, Statement::Block(body)))
     }
 
     pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
         if next_token_matches!(self, TT::Keyword, "var") {
             Ok(self.var_declaration()?)
         } else if next_token_matches!(self, TT::Keyword, "fun") {
-            Ok(self.fun_declaration()?)
+            Ok(self.fun_or_method_declaration(false)?)
         } else if next_token_matches!(self, TT::Keyword, "class") {
             Ok(self.class_declaration()?)
         } else if self.peek().is_some() {
@@ -540,14 +580,14 @@ pub enum Statement {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Literal(LiteralExpr),
+    Name(Token, String),
     Unary(Token, Box<Expr>),
     Binary(Box<Expr>, Token, Box<Expr>),
     Grouping(Box<Expr>),
-    Name(Token, String),
     Assign(Box<Expr>, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
-    FnCall(Box<Expr>, Token, Vec<Expr>),
-    FieldAccess(Token, Vec<Expr>),
+    Call(Box<Expr>, Token, Vec<Expr>),
+    Dotted(Token, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -606,8 +646,8 @@ pub trait Visit {
             Expr::Name(_, _) => todo!(),
             Expr::Assign(_token, _expr) => todo!(),
             Expr::Logical(_expr, _token, _expr1) => todo!(),
-            Expr::FnCall(_expr, _token, _vec) => todo!(),
-            Expr::FieldAccess(token, exprs) => todo!(),
+            Expr::Call(_expr, _token, _vec) => todo!(),
+            Expr::Dotted(_, _, _) => todo!(),
         }
     }
 
@@ -681,8 +721,8 @@ impl Visit for AstPrinter {
                 print!("{}", token.lexeme);
                 self.visit_expr(*expr2);
             }
-            Expr::FnCall(_expr, _token, _vec) => todo!(),
-            Expr::FieldAccess(exprs, _) => todo!(),
+            Expr::Call(_expr, _token, _vec) => todo!(),
+            Expr::Dotted(_, _, _) => todo!(),
         }
     }
 }

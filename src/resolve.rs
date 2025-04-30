@@ -149,8 +149,14 @@ impl Resolver {
                 self.in_function_scope = old_in_function_scope;
                 self.define(token);
             }
-            Declaration::Class(token, _statement) => {
+            Declaration::Class(token, statement) => {
                 self.define(token);
+                let Statement::Block(body) = statement else {
+                    todo!()
+                };
+                for declaration in body {
+                    self.resolve_declaration(declaration)?
+                }
             }
         }
         Ok(())
@@ -179,13 +185,16 @@ impl Resolver {
                     //return resolving_error(token, UndefinedName); // Might be global
                 }
             },
-            Expr::FnCall(expr, _, exprs) => {
+            Expr::Call(expr, _, exprs) => {
                 self.resolve_expr(expr)?;
                 for expr in exprs {
                     self.resolve_expr(expr)?;
                 }
             }
-            Expr::FieldAccess(token, exprs) => self.resolve_expr(&exprs[0])?,
+            Expr::Dotted(_, left, right) => {
+                self.resolve_expr(left)?;
+                self.resolve_expr(right)?;
+            }
         }
         Ok(())
     }

@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use thiserror::Error;
 
-use crate::interpreter::{Environment, Interpreter};
+use crate::interpreter::{Callable, Environment, Interpreter};
 use crate::lexer::{Token, TokenType};
 use crate::parser::{Ast, Expr, Statement};
 
@@ -23,7 +23,7 @@ pub enum Value {
     },
     Class {
         name: String,
-        body: Statement,
+        methods: HashMap<String, Value>,
     },
     ClassInstance {
         class: Box<Value>,
@@ -51,10 +51,10 @@ pub enum EvalErrorType {
     UndefinedFunction,
     #[error("Wrong argument number: expected {0}, got {1}")]
     WrongArgumentNumber(usize, usize),
-    #[error("Invalid field access")]
-    InvalidFieldAccess,
     #[error("Undefined field")]
     UndefinedField,
+    #[error("Undefined method")]
+    UndefinedMethod,
 }
 
 use EvalErrorType::*;
@@ -235,28 +235,32 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 }
                 Ok(result)
             }
-            Expr::FieldAccess(ref token, ref names) => {
-                let Expr::Name(ref first_name_token, ref address) = names[0] else {
-                    todo!()
+            Expr::Dotted(ref _token, ref left, ref right) => {
+                let mut instance @ Value::ClassInstance { .. } = eval_expr(left, interpreter)?
+                else {
+                    todo!();
                 };
-                let mut first_name = eval_expr(&names[0], interpreter)?;
-                let Expr::Name(ref field_token, _) = names[1] else {
-                    return eval_error(token, InvalidFieldAccess);
+                let Expr::Name(left_token, left_address) = left.as_ref() else {
+                    todo!();
+                };
+
+                let Expr::Name(right_token, _) = right.as_ref() else {
+                    todo!();
                 };
 
                 let rhs = eval_expr(expr, interpreter)?;
                 if let Value::ClassInstance {
                     ref mut properties, ..
-                } = &mut first_name
+                } = &mut instance
                 {
-                    properties.insert(field_token.lexeme.clone(), rhs);
+                    properties.insert(right_token.lexeme.clone(), rhs.clone());
                 } else {
                     todo!()
                 }
-                if !interpreter.assign_var(first_name_token, address, first_name.clone()) {
-                    return eval_error(first_name_token, UndefinedVariable);
+                if !interpreter.assign_var(left_token, left_address, instance.clone()) {
+                    return eval_error(left_token, UndefinedVariable);
                 }
-                Ok(first_name.clone())
+                Ok(rhs.clone())
             }
             _ => todo!("Invalid assingee"),
         },
@@ -272,34 +276,71 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 }
             }
         }
-        Expr::FnCall(callee, token, args) => {
+        Expr::Call(callee, token, args) => {
             let mut call_args = vec![];
             for expr in args {
                 call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
             }
-            let Ok(Value::Fn { name, .. } | Value::Class { name, .. }) =
-                eval_expr(callee, interpreter)
-            else {
-                return eval_error(token, UndefinedFunction);
-            };
-            if is_primitive(&name) {
-                eval_primitive_function(&name, token)
-            } else {
-                interpreter.call_function(callee, call_args, token)
+            match eval_expr(callee, interpreter)? {
+                Value::Fn { name, .. } | Value::Class { name, .. } if is_primitive(&name) => {
+                    eval_primitive_function(&name, token)
+                }
+                Value::Fn { .. } => {
+                    interpreter.call(&Callable::Expr(*callee.clone()), call_args, token)
+                }
+                val @ Value::Class { .. } => {
+                    interpreter.call(&Callable::Class(val), call_args, token)
+                }
+                _ => eval_error(token, UndefinedFunction),
             }
         }
-        Expr::FieldAccess(token, ref names) => {
-            let Value::ClassInstance { class, properties } = eval_expr(&names[0], interpreter)?
-            else {
-                return eval_error(token, UndefinedFunction);
+        Expr::Dotted(_, ref left, ref right) => {
+            eval_expr_in_class_instance(right, left, interpreter)
+        }
+    }
+}
+
+fn eval_expr_in_class_instance(
+    expr: &Expr,
+    class_instance_expr: &Expr,
+    interpreter: &mut Interpreter,
+) -> Result<Value, EvalError> {
+    let Value::ClassInstance { class, properties } = &eval_expr(class_instance_expr, interpreter)?
+    else {
+        todo!("Can't be");
+    };
+    let Value::Class { methods, .. } = &**class else {
+        todo!()
+    };
+    match expr {
+        Expr::Literal(_)
+        | Expr::Unary(_, _)
+        | Expr::Binary(_, _, _)
+        | Expr::Logical(_, _, _)
+        | Expr::Assign(_, _) => todo!("Can't be"),
+        Expr::Grouping(expr) => eval_expr_in_class_instance(expr, class_instance_expr, interpreter),
+        Expr::Name(token, _) => properties
+            .get(&token.lexeme)
+            .or(methods.get(&token.lexeme))
+            .map_or_else(
+                || eval_error(token, UndefinedField),
+                |x| Result::Ok(x.clone()),
+            ),
+        Expr::Call(callee, token, args_exprs) => {
+            let Expr::Name(callee, _) = &**callee else {
+                todo!()
             };
-            let Expr::Name(ref token, _) = names[1] else {
-                return eval_error(token, InvalidFieldAccess);
+            let Some(method) = methods.get(&callee.lexeme) else {
+                return eval_error(callee, UndefinedMethod);
             };
-            match properties.get(&token.lexeme) {
-                Some(val) => Ok(val.clone()),
-                None => eval_error(&token, UndefinedField),
+            let mut call_args = vec![];
+            for expr in args_exprs {
+                call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
             }
+            interpreter.call(&Callable::Method(method.clone()), call_args, token)
+        }
+        Expr::Dotted(_, _, _) => {
+            todo!()
         }
     }
 }

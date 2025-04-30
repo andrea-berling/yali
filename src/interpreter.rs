@@ -37,6 +37,12 @@ impl Debug for Environment {
     }
 }
 
+pub enum Callable {
+    Expr(Expr),
+    Class(Value),
+    Method(Value),
+}
+
 pub struct Interpreter {
     pub program: Program,
     pub current_environment: Rc<RefCell<Environment>>,
@@ -259,11 +265,28 @@ impl Interpreter {
                 Ok(())
             }
             Declaration::Class(name, body) => {
+                let mut methods = HashMap::new();
+                let Statement::Block(body) = body else {
+                    todo!();
+                };
+                for declaration in body {
+                    if let Declaration::Function(name, args, body) = declaration {
+                        methods.insert(
+                            name.lexeme.clone(),
+                            Value::Fn {
+                                name: name.lexeme.clone(),
+                                formal_args: args.clone(),
+                                body: body.clone(),
+                                environment: self.current_environment.clone(),
+                            },
+                        );
+                    }
+                }
                 self.set_var(
                     &name.lexeme,
                     Value::Class {
                         name: name.lexeme.clone(),
-                        body: body.clone(),
+                        methods,
                     },
                     true,
                 );
@@ -276,13 +299,18 @@ impl Interpreter {
         self.statement(&self.program.clone())
     }
 
-    pub fn call_function(
+    pub fn call(
         &mut self,
-        function_expr: &Expr,
+        callable: &Callable,
         call_args: Vec<(Expr, Value)>,
         token: &Token,
     ) -> Result<Value, EvalError> {
-        let callee = eval_expr(function_expr, self)?;
+        let callee = match callable {
+            Callable::Expr(expr) => eval_expr(expr, self)?,
+            Callable::Class(val @ Value::Class { .. })
+            | Callable::Method(val @ Value::Fn { .. }) => val.clone(),
+            _ => todo!(),
+        };
         let Value::Fn {
             name,
             formal_args,
@@ -290,7 +318,7 @@ impl Interpreter {
             environment,
         } = callee
         else {
-            if let class @ Value::Class { name, body } = &callee {
+            if let class @ Value::Class { .. } = &callee {
                 return Ok(Value::ClassInstance {
                     class: Box::new(class.clone()),
                     properties: HashMap::new(),
@@ -310,7 +338,9 @@ impl Interpreter {
         };
 
         let old_environment = self.current_environment.clone();
-        self.set_environment(environment);
+        if !matches!(callable, Callable::Method(_)) {
+            self.set_environment(environment);
+        }
         let mut new_env = Environment::default();
         for (var_token, var_value) in zip(
             formal_args.clone(),
@@ -356,26 +386,29 @@ impl Interpreter {
         }
 
         self.pop_environment();
-        let fn_environment = self.pop_environment();
-        self.set_environment(old_environment);
-        if let Expr::Name(ref t, ref address) = function_expr {
-            self.assign_var(
-                t,
-                address,
-                Value::Fn {
-                    environment: fn_environment,
-                    name,
-                    formal_args,
-                    body,
-                },
-            );
+
+        if !matches!(callable, Callable::Method(_)) {
+            let fn_environment = self.pop_environment();
+            self.set_environment(old_environment);
+            if let Callable::Expr(Expr::Name(ref t, ref address)) = callable {
+                self.assign_var(
+                    t,
+                    address,
+                    Value::Fn {
+                        environment: fn_environment,
+                        name,
+                        formal_args,
+                        body,
+                    },
+                );
+            }
         }
 
         for (expr, value) in values_to_update {
             if let Expr::Name(token, address) = expr {
                 self.assign_var(&token, &address, value);
-            } else if let Expr::FieldAccess(_, names) = expr {
-                if let Expr::Name(token, address) = &names[0] {
+            } else if let Expr::Dotted(_, left, _) = expr {
+                if let Expr::Name(token, address) = &*left {
                     self.assign_var(token, address, value);
                 }
             }
