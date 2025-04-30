@@ -97,6 +97,8 @@ pub enum EvalErrorType {
     UndefinedMethod,
     #[error("Invalid reference to this")]
     InvalidReferenceToThis,
+    #[error("Can only call functions and classes")]
+    CantCallThis,
 }
 
 use EvalErrorType::*;
@@ -333,7 +335,7 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 val @ Value::Class { .. } => {
                     interpreter.call(&Callable::Class(val), call_args, None, token)
                 }
-                _ => eval_error(token, UndefinedFunction),
+                _ => eval_error(token, CantCallThis)?,
             }
         }
         Expr::Dotted(_, ref head, ref tail) => eval_expr_in_class_instance(tail, head, interpreter),
@@ -411,9 +413,7 @@ fn eval_expr_in_class_instance(
                         sub_token,
                     )?)
                 }
-                _ => {
-                    todo!()
-                }
+                _ => eval_error(token, CantCallThis)?,
             };
             let mut call_args = vec![];
             for expr in args_exprs {

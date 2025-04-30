@@ -15,6 +15,8 @@ pub enum ResolvingErrorType {
     InconsistentReference,
     #[error("Return statements are only allowed within function bodies")]
     InvalidReturn,
+    #[error("Can't use 'this' outside of a class")]
+    UseOfThisOutsideOfClass,
 }
 
 use ResolvingErrorType::*;
@@ -39,6 +41,7 @@ pub struct Resolver {
     resolved_expressions: HashMap<String, usize>,
     scopes: VecDeque<Scope>,
     in_function_scope: bool,
+    in_class_scope: bool,
 }
 
 impl Resolver {
@@ -47,6 +50,7 @@ impl Resolver {
             resolved_expressions: HashMap::new(),
             scopes: VecDeque::new(),
             in_function_scope: false,
+            in_class_scope: false,
         }
     }
 
@@ -150,6 +154,7 @@ impl Resolver {
                 self.define(token);
             }
             Declaration::Class(token, statement) => {
+                self.in_class_scope = true;
                 self.define(token);
                 let Statement::Block(body) = statement else {
                     todo!()
@@ -157,6 +162,7 @@ impl Resolver {
                 for declaration in body {
                     self.resolve_declaration(declaration)?
                 }
+                self.in_class_scope = false;
             }
         }
         Ok(())
@@ -195,7 +201,11 @@ impl Resolver {
                 self.resolve_expr(left)?;
                 self.resolve_expr(right)?;
             }
-            Expr::This(_) => {}
+            Expr::This(token) => {
+                if !self.in_class_scope {
+                    return resolving_error(token, UseOfThisOutsideOfClass);
+                }
+            }
         }
         Ok(())
     }
