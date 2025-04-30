@@ -153,6 +153,7 @@ impl Parser {
                 "true" => Ok(Expr::Literal(LiteralExpr::True)),
                 "false" => Ok(Expr::Literal(LiteralExpr::False)),
                 "nil" => Ok(Expr::Literal(LiteralExpr::Nil)),
+                "this" => Ok(Expr::This(token.clone())),
                 _ => self.error(UnexpectedToken {
                     expected: "expression".to_string(),
                 }),
@@ -225,16 +226,19 @@ impl Parser {
             Ok(Expr::Unary(operator, Box::new(self.unary()?)))
         } else {
             let previous_position = self.position;
-            if let Err(ParsingError {
-                error: InvalidLhs(Some(expr)),
-                ..
-            }) = self.lhs()
-            {
-                Ok(expr)
-            } else {
-                // TODO: revise
-                self.set_position(previous_position);
-                self.call_or_ident(false, false)
+            self.peek();
+            self.peek2();
+            match self.lhs() {
+                Err(ParsingError {
+                    error: InvalidLhs(Some(expr)),
+                    ..
+                })
+                | Ok(expr) => Ok(expr),
+                _ => {
+                    // TODO: revise
+                    self.set_position(previous_position);
+                    self.call_or_ident(false, false)
+                }
             }
         }
     }
@@ -249,7 +253,8 @@ impl Parser {
     }
 
     fn lhs(&mut self) -> Result<Expr, ParsingError> {
-        if next_token_matches!(self, TT::Identifier)
+        if (next_token_matches!(self, TT::Identifier)
+            || next_token_matches!(self, TT::Keyword, "this"))
             && second_next_token_matches!(self, TT::Dot | TT::LeftParen | TT::Equal)
         {
             let mut expr = self.call_or_ident(true, true)?;
@@ -588,6 +593,7 @@ pub enum Expr {
     Logical(Box<Expr>, Token, Box<Expr>),
     Call(Box<Expr>, Token, Vec<Expr>),
     Dotted(Token, Box<Expr>, Box<Expr>),
+    This(Token),
 }
 
 #[derive(Debug, Clone)]
@@ -648,6 +654,7 @@ pub trait Visit {
             Expr::Logical(_expr, _token, _expr1) => todo!(),
             Expr::Call(_expr, _token, _vec) => todo!(),
             Expr::Dotted(_, _, _) => todo!(),
+            Expr::This(_) => todo!(),
         }
     }
 
@@ -723,6 +730,7 @@ impl Visit for AstPrinter {
             }
             Expr::Call(_expr, _token, _vec) => todo!(),
             Expr::Dotted(_, _, _) => todo!(),
+            Expr::This(_) => todo!(),
         }
     }
 }

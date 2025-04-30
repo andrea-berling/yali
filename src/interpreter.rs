@@ -22,6 +22,7 @@ pub enum RuntimeError {
 pub struct Environment {
     parent: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Value>,
+    this: Option<Value>,
 }
 
 impl Debug for Environment {
@@ -61,10 +62,12 @@ impl Environment {
                         formal_args: vec![],
                         body: Statement::Block(vec![]),
                         environment: Default::default(),
+                        this: None,
                     },
                 )
             })),
             parent: Default::default(),
+            this: None,
         }
     }
 
@@ -259,6 +262,7 @@ impl Interpreter {
                         formal_args: args.clone(),
                         body: body.clone(),
                         environment: self.current_environment.clone(),
+                        this: None,
                     },
                     true,
                 );
@@ -278,6 +282,7 @@ impl Interpreter {
                                 formal_args: args.clone(),
                                 body: body.clone(),
                                 environment: self.current_environment.clone(),
+                                this: None,
                             },
                         );
                     }
@@ -303,6 +308,7 @@ impl Interpreter {
         &mut self,
         callable: &Callable,
         call_args: Vec<(Expr, Value)>,
+        this: Option<Value>,
         token: &Token,
     ) -> Result<Value, EvalError> {
         let callee = match callable {
@@ -316,6 +322,7 @@ impl Interpreter {
             formal_args,
             body,
             environment,
+            this: fn_this,
         } = callee
         else {
             if let class @ Value::Class { .. } = &callee {
@@ -351,6 +358,13 @@ impl Interpreter {
                 .1,
         ) {
             new_env.set(&var_token.lexeme, var_value, true);
+        }
+        if matches!(callable, Callable::Method(_)) {
+            new_env.this = if let Some(this) = fn_this.as_deref() {
+                Some(this.clone())
+            } else {
+                this
+            }
         }
         self.add_environment(new_env);
 
@@ -399,6 +413,7 @@ impl Interpreter {
                         name,
                         formal_args,
                         body,
+                        this: fn_this,
                     },
                 );
             }
@@ -415,5 +430,17 @@ impl Interpreter {
         }
 
         Ok(return_value)
+    }
+
+    pub fn get_this(&self) -> Option<Value> {
+        // TODO: review all the cloning around
+        let mut cur_env = self.current_environment.clone();
+        let mut this = cur_env.borrow().this.clone();
+        while this.is_none() && cur_env.borrow().parent.is_some() {
+            let tmp = cur_env.borrow().parent.as_ref().unwrap().clone();
+            this = tmp.borrow().this.clone();
+            cur_env = tmp;
+        }
+        this
     }
 }

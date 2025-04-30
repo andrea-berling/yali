@@ -20,6 +20,7 @@ pub enum Value {
         formal_args: Vec<Token>,
         body: Statement,
         environment: Rc<RefCell<Environment>>,
+        this: Option<Box<Value>>,
     },
     Class {
         name: String,
@@ -29,6 +30,45 @@ pub enum Value {
         class: Box<Value>,
         properties: HashMap<String, Value>,
     },
+}
+
+#[allow(dead_code)]
+impl Value {
+    pub fn get_this(&self) -> Option<Value> {
+        if let Value::Fn { this, .. } = self {
+            this.clone().as_deref().cloned()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_name(&self) -> Option<String> {
+        match self {
+            Value::Fn { name, .. } | Value::Class { name, .. } => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_properties(&self) -> Option<&HashMap<String, Value>> {
+        if let Value::ClassInstance { properties, .. } = self {
+            Some(properties)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_type(&self) -> String {
+        match self {
+            Value::Number(_) => "Number",
+            Value::String(_) => "String",
+            Value::Bool(_) => "Bool",
+            Value::Nil => "Nil",
+            Value::Fn { .. } => "Fn",
+            Value::Class { .. } => "Class",
+            Value::ClassInstance { .. } => "ClassInstance",
+        }
+        .to_string()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -55,6 +95,8 @@ pub enum EvalErrorType {
     UndefinedField,
     #[error("Undefined method")]
     UndefinedMethod,
+    #[error("Invalid reference to this")]
+    InvalidReferenceToThis,
 }
 
 use EvalErrorType::*;
@@ -227,7 +269,7 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 eval_error(token, UndefinedVariableOrFunction)
             }
         }
-        Expr::Assign(lhs, expr) => match **lhs {
+        Expr::Assign(lhs, expr) => match lhs.as_ref() {
             Expr::Name(ref token, ref address) => {
                 let result = eval_expr(expr, interpreter)?;
                 if !interpreter.assign_var(token, address, result.clone()) {
@@ -235,16 +277,16 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 }
                 Ok(result)
             }
-            Expr::Dotted(ref _token, ref left, ref right) => {
-                let mut instance @ Value::ClassInstance { .. } = eval_expr(left, interpreter)?
+            Expr::Dotted(ref _token, ref head, ref tail) => {
+                let mut instance @ Value::ClassInstance { .. } = eval_expr(head, interpreter)?
                 else {
                     todo!();
                 };
-                let Expr::Name(left_token, left_address) = left.as_ref() else {
+                let Expr::Name(left_token, left_address) = head.as_ref() else {
                     todo!();
                 };
 
-                let Expr::Name(right_token, _) = right.as_ref() else {
+                let Expr::Name(right_token, _) = tail.as_ref() else {
                     todo!();
                 };
 
@@ -286,62 +328,103 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                     eval_primitive_function(&name, token)
                 }
                 Value::Fn { .. } => {
-                    interpreter.call(&Callable::Expr(*callee.clone()), call_args, token)
+                    interpreter.call(&Callable::Expr(*callee.clone()), call_args, None, token)
                 }
                 val @ Value::Class { .. } => {
-                    interpreter.call(&Callable::Class(val), call_args, token)
+                    interpreter.call(&Callable::Class(val), call_args, None, token)
                 }
                 _ => eval_error(token, UndefinedFunction),
             }
         }
-        Expr::Dotted(_, ref left, ref right) => {
-            eval_expr_in_class_instance(right, left, interpreter)
-        }
+        Expr::Dotted(_, ref head, ref tail) => eval_expr_in_class_instance(tail, head, interpreter),
+        Expr::This(token) => interpreter
+            .get_this()
+            .map_or(eval_error(token, InvalidReferenceToThis), Result::Ok),
     }
 }
 
 fn eval_expr_in_class_instance(
-    expr: &Expr,
-    class_instance_expr: &Expr,
+    tail: &Expr,
+    head: &Expr,
     interpreter: &mut Interpreter,
 ) -> Result<Value, EvalError> {
-    let Value::ClassInstance { class, properties } = &eval_expr(class_instance_expr, interpreter)?
+    let instance @ Value::ClassInstance { class, properties } = &eval_expr(head, interpreter)?
     else {
         todo!("Can't be");
     };
-    let Value::Class { methods, .. } = &**class else {
+    let Value::Class { methods, .. } = class.as_ref() else {
         todo!()
     };
-    match expr {
+    match tail {
         Expr::Literal(_)
         | Expr::Unary(_, _)
         | Expr::Binary(_, _, _)
         | Expr::Logical(_, _, _)
         | Expr::Assign(_, _) => todo!("Can't be"),
-        Expr::Grouping(expr) => eval_expr_in_class_instance(expr, class_instance_expr, interpreter),
+        Expr::Grouping(expr) => eval_expr_in_class_instance(expr, head, interpreter),
         Expr::Name(token, _) => properties
             .get(&token.lexeme)
-            .or(methods.get(&token.lexeme))
-            .map_or_else(
-                || eval_error(token, UndefinedField),
-                |x| Result::Ok(x.clone()),
-            ),
+            .cloned()
+            .or(
+                if let Some(mut method) = methods.get(&token.lexeme).cloned() {
+                    if let Value::Fn { this, .. } = &mut method {
+                        *this = Some(Box::new(instance.clone()));
+                        Some(method)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                },
+            )
+            .map_or_else(|| eval_error(token, UndefinedField), Result::Ok),
         Expr::Call(callee, token, args_exprs) => {
-            let Expr::Name(callee, _) = &**callee else {
-                todo!()
-            };
-            let Some(method) = methods.get(&callee.lexeme) else {
-                return eval_error(callee, UndefinedMethod);
+            let callable = match callee.as_ref() {
+                Expr::Name(callee, _) => {
+                    let Some(mut method) = methods.get(&callee.lexeme).cloned() else {
+                        return eval_error(callee, UndefinedMethod);
+                    };
+                    if let Value::Fn { this, .. } = &mut method {
+                        *this = Some(Box::new(instance.clone()));
+                    }
+                    if let Some(overridden_method @ Value::Fn { .. }) =
+                        properties.get(&callee.lexeme)
+                    {
+                        method = overridden_method.clone();
+                    }
+                    Callable::Method(method)
+                }
+                Expr::Call(sub_callee, sub_token, sub_args_exprs) => {
+                    let mut call_args = vec![];
+                    for expr in sub_args_exprs {
+                        call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
+                    }
+                    let method = &Callable::Method(eval_expr_in_class_instance(
+                        sub_callee,
+                        head,
+                        interpreter,
+                    )?);
+                    Callable::Method(interpreter.call(
+                        method,
+                        call_args,
+                        Some(instance.clone()),
+                        sub_token,
+                    )?)
+                }
+                _ => {
+                    todo!()
+                }
             };
             let mut call_args = vec![];
             for expr in args_exprs {
                 call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
             }
-            interpreter.call(&Callable::Method(method.clone()), call_args, token)
+            interpreter.call(&callable, call_args, Some(instance.clone()), token)
         }
         Expr::Dotted(_, _, _) => {
             todo!()
         }
+        Expr::This(_) => todo!(),
     }
 }
 

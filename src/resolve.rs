@@ -195,6 +195,7 @@ impl Resolver {
                 self.resolve_expr(left)?;
                 self.resolve_expr(right)?;
             }
+            Expr::This(_) => {}
         }
         Ok(())
     }
