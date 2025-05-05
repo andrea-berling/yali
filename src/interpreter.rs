@@ -341,16 +341,19 @@ impl<'a> Interpreter<'a> {
                 ..
             } = &*callee.borrow()
             {
-                let new_instance = match superclass {
-                    Some(class) => {
-                        self.call(&Callable::Class(class.clone()), call_args, None, token)?
-                    }
-                    None => Value::ClassInstance {
-                        class: callee.clone(),
-                        properties: HashMap::new(),
-                    }
-                    .into(),
-                };
+                let new_instance: Rc<RefCell<Value>> = Value::ClassInstance {
+                    class: callee.clone(),
+                    properties: match superclass {
+                        Some(class) => self
+                            .call(&Callable::Class(class.clone()), call_args, None, token)?
+                            .borrow()
+                            .get_properties()
+                            .unwrap()
+                            .clone(),
+                        None => HashMap::new(),
+                    },
+                }
+                .into();
 
                 if let Some(initializer) = methods.get("init") {
                     if matches!(&*initializer.borrow(), Value::Fn { .. }) {
