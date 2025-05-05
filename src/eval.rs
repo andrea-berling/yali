@@ -120,6 +120,17 @@ impl Value {
         }
     }
 
+    pub fn get_superclass(&self) -> Option<Rc<RefCell<Value>>> {
+        if let Value::ClassInstance {
+            class: superclass, ..
+        } = self
+        {
+            Some(superclass.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn get_methods(&self) -> Option<&HashMap<String, Rc<RefCell<Value>>>> {
         if let Value::Class { methods, .. } = self {
             Some(methods)
@@ -433,20 +444,29 @@ fn eval_expr_in_class_instance(
                 match properties.get(&token.lexeme) {
                     Some(property) => Ok(property.clone()),
                     None => {
-                        if let Value::Class { methods, .. } = &*class.borrow() {
-                            match methods.get(&token.lexeme) {
-                                Some(method) => {
-                                    let mut new_bound_function = method.borrow().clone();
-                                    if let Value::Fn { this, .. } = &mut new_bound_function {
-                                        let _ = this.insert(class_instance.clone());
+                        let mut class = Some(class.clone());
+                        while class.is_some() {
+                            if let Value::Class {
+                                methods,
+                                superclass,
+                                ..
+                            } = &*class.clone().unwrap().borrow()
+                            {
+                                match methods.get(&token.lexeme) {
+                                    Some(method) => {
+                                        let mut new_bound_function = method.borrow().clone();
+                                        if let Value::Fn { this, .. } = &mut new_bound_function {
+                                            let _ = this.insert(class_instance.clone());
+                                        }
+                                        return Ok(new_bound_function.into());
                                     }
-                                    Ok(new_bound_function.into())
+                                    None => class = superclass.clone(),
                                 }
-                                None => eval_error(token, UndefinedField)?,
+                            } else {
+                                todo!();
                             }
-                        } else {
-                            todo!()
                         }
+                        eval_error(token, UndefinedField)?
                     }
                 }
             } else {
@@ -459,16 +479,30 @@ fn eval_expr_in_class_instance(
                     if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
                         let mut method = properties.get(&callee_token.lexeme).cloned();
                         if method.is_none() {
-                            if let Value::Class { methods, .. } = &*class.borrow() {
-                                if let Some(class_method) = methods.get(&callee_token.lexeme) {
-                                    let mut new_bound_function = class_method.borrow().clone();
-                                    if let Value::Fn { this, .. } = &mut new_bound_function {
-                                        let _ = this.insert(class_instance.clone());
+                            let mut class = Some(class.clone());
+                            while class.is_some() {
+                                if let Value::Class {
+                                    methods,
+                                    superclass,
+                                    ..
+                                } = &*class.clone().unwrap().borrow()
+                                {
+                                    match methods.get(&callee_token.lexeme) {
+                                        Some(class_method) => {
+                                            let mut new_bound_function =
+                                                class_method.borrow().clone();
+                                            if let Value::Fn { this, .. } = &mut new_bound_function
+                                            {
+                                                let _ = this.insert(class_instance.clone());
+                                            }
+                                            method = Some(new_bound_function.into());
+                                            break;
+                                        }
+                                        None => class = superclass.clone(),
                                     }
-                                    let _ = method.insert(new_bound_function.into());
+                                } else {
+                                    todo!();
                                 }
-                            } else {
-                                todo!()
                             }
                         }
                         match method {
