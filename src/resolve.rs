@@ -15,6 +15,8 @@ pub enum ResolvingErrorType {
     InconsistentReference,
     #[error("Return statements are only allowed within function bodies")]
     InvalidReturn,
+    #[error("Undefined name")]
+    UndefinedName,
     #[error("Can't use 'this' outside of a class")]
     UseOfThisOutsideOfClass,
     #[error("Can't return a value from an initializer")]
@@ -42,6 +44,7 @@ type Scope = HashMap<String, bool>;
 pub struct Resolver {
     resolved_expressions: HashMap<String, usize>,
     scopes: VecDeque<Scope>,
+    globals: Scope,
     in_function_scope: bool,
     in_class_scope: bool,
     in_class_constructor: bool,
@@ -55,6 +58,7 @@ impl Resolver {
             in_function_scope: false,
             in_class_scope: false,
             in_class_constructor: false,
+            globals: HashMap::new(),
         }
     }
 
@@ -107,12 +111,16 @@ impl Resolver {
     fn declare(&mut self, token: &Token) {
         if let Some(scope) = self.scopes.front_mut() {
             scope.insert(token.lexeme.clone(), false);
+        } else {
+            self.globals.insert(token.lexeme.clone(), false);
         }
     }
 
     fn define(&mut self, token: &Token) {
         if let Some(scope) = self.scopes.front_mut() {
             scope.insert(token.lexeme.clone(), true);
+        } else {
+            self.globals.insert(token.lexeme.clone(), true);
         }
     }
 
@@ -165,10 +173,11 @@ impl Resolver {
             }
             Declaration::Class(token, superclass, statement) => {
                 self.in_class_scope = true;
-                self.define(token);
+                self.declare(token);
                 if let Some(superclass) = superclass {
                     self.resolve_expr(superclass)?;
                 }
+                self.define(token);
                 let Statement::Block(body) = statement else {
                     todo!()
                 };
@@ -200,9 +209,15 @@ impl Resolver {
                 Some((_, false)) => {
                     return resolving_error(token, InconsistentReference);
                 }
-                None => {
-                    //return resolving_error(token, UndefinedName); // Might be global
-                }
+                None => match self.globals.get(&token.lexeme) {
+                    None => {
+                        return resolving_error(token, UndefinedName);
+                    }
+                    Some(false) => {
+                        return resolving_error(token, InconsistentReference);
+                    }
+                    _ => {}
+                },
             },
             Expr::Call(expr, _, exprs) => {
                 self.resolve_expr(expr)?;

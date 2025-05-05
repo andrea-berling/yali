@@ -16,6 +16,8 @@ pub enum RuntimeError {
     EvalError(#[from] EvalError),
     #[error("No error")]
     EarlyExit(Rc<RefCell<Value>>),
+    #[error("Superclass must be a class")]
+    SuperclassesMustBeClasses,
 }
 
 #[derive(Default)]
@@ -270,7 +272,11 @@ impl<'a> Interpreter<'a> {
             }
             Declaration::Class(name, superclass, body) => {
                 let superclass = if let Some(superclass) = superclass {
-                    Some(eval_expr(superclass, self)?.clone())
+                    let superclass = eval_expr(superclass, self)?.clone();
+                    if superclass.borrow().get_type() != "Class" {
+                        return Err(RuntimeError::SuperclassesMustBeClasses);
+                    }
+                    Some(superclass)
                 } else {
                     None
                 };
