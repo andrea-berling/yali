@@ -21,6 +21,10 @@ pub enum ResolvingErrorType {
     UseOfThisOutsideOfClass,
     #[error("Can't return a value from an initializer")]
     InvalidReturnInConstructor,
+    #[error("Can't use 'super' outside of a class")]
+    UseOfSuperOutsideOfClass,
+    #[error("Can't use 'super' in a class with no superclass")]
+    UseOfSuperOutsideOfSubclass,
 }
 
 use ResolvingErrorType::*;
@@ -47,6 +51,7 @@ pub struct Resolver {
     globals: Scope,
     in_function_scope: bool,
     in_class_scope: bool,
+    in_subclass_scope: bool,
     in_class_constructor: bool,
     in_dotted_expression: bool,
 }
@@ -61,6 +66,7 @@ impl Resolver {
             in_class_constructor: false,
             globals: HashMap::new(),
             in_dotted_expression: false,
+            in_subclass_scope: false,
         }
     }
 
@@ -175,6 +181,9 @@ impl Resolver {
             }
             Declaration::Class(token, superclass, statement) => {
                 self.in_class_scope = true;
+                superclass
+                    .as_ref()
+                    .inspect(|_| self.in_subclass_scope = true);
                 self.declare(token);
                 if let Some(superclass) = superclass {
                     self.resolve_expr(superclass)?;
@@ -187,6 +196,9 @@ impl Resolver {
                     self.resolve_declaration(declaration)?
                 }
                 self.in_class_scope = false;
+                superclass
+                    .as_ref()
+                    .inspect(|_| self.in_subclass_scope = false);
             }
         }
         Ok(())
@@ -242,9 +254,17 @@ impl Resolver {
                 self.resolve_expr(right)?;
                 self.in_dotted_expression = in_dotted_expression;
             }
-            Expr::This(token) | Expr::Super(token) => {
+            Expr::This(token) => {
                 if !self.in_class_scope {
                     return resolving_error(token, UseOfThisOutsideOfClass);
+                }
+            }
+            Expr::Super(token) => {
+                if !self.in_class_scope {
+                    return resolving_error(token, UseOfSuperOutsideOfClass);
+                }
+                if !self.in_subclass_scope {
+                    return resolving_error(token, UseOfSuperOutsideOfSubclass);
                 }
             }
         }

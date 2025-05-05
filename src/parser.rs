@@ -204,6 +204,13 @@ impl Parser {
                 });
             }
         }
+        if let Expr::Super(_) = call_or_ident {
+            if !next_token_matches!(self, TT::Dot) {
+                return self.error(UnexpectedToken {
+                    expected: ".".into(),
+                });
+            }
+        }
         if let Expr::Grouping(_) = call_or_ident {
             if no_grouping {
                 todo!("No grouping allowed");
