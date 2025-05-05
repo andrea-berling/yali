@@ -72,7 +72,7 @@ fn main() {
                 "run" => match parser.parse_program() {
                     Ok(program) => match Resolver::new().resolve(&program) {
                         Ok(resolution_table) => {
-                            if let Err(err) = Interpreter::new(&program, resolution_table).run() {
+                            if let Err(err) = Interpreter::new(&resolution_table).run(&program) {
                                 eprintln!("{err}");
                                 exit_code = 70;
                             }

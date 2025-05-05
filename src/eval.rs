@@ -9,7 +9,7 @@ use crate::interpreter::{Callable, Environment, Interpreter};
 use crate::lexer::{Token, TokenType};
 use crate::parser::{Ast, Expr, Statement};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -20,23 +20,63 @@ pub enum Value {
         formal_args: Vec<Token>,
         body: Statement,
         environment: Rc<RefCell<Environment>>,
-        this: Option<Box<Value>>,
+        this: Option<Rc<RefCell<Value>>>,
     },
     Class {
         name: String,
-        methods: HashMap<String, Value>,
+        methods: HashMap<String, Rc<RefCell<Value>>>,
     },
     ClassInstance {
-        class: Box<Value>,
-        properties: HashMap<String, Value>,
+        class: Rc<RefCell<Value>>,
+        properties: HashMap<String, Rc<RefCell<Value>>>,
     },
 }
 
-#[allow(dead_code)]
+impl Debug for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Value::")?;
+        match self {
+            Value::Number(n) => f.debug_tuple("Number").field(n).finish(),
+            Value::String(s) => f.debug_tuple("String").field(s).finish(),
+            Value::Bool(b) => f.debug_tuple("Bool").field(b).finish(),
+            Value::Nil => f.debug_tuple("Nil").finish(),
+            Value::Fn {
+                ref name,
+                ref formal_args,
+                ref environment,
+                ref this,
+                ..
+            } => f
+                .debug_struct("Fn")
+                .field("name", name)
+                .field("format_args", formal_args)
+                .field("environment", environment)
+                .field("this", this)
+                .finish(),
+            Value::Class { name, methods } => f
+                .debug_struct("Class")
+                .field("name", name)
+                .field("methods", &methods.keys())
+                .finish(),
+            Value::ClassInstance { class, properties } => f
+                .debug_struct("ClassInstance")
+                .field("properties", properties)
+                .field("class", class)
+                .finish(),
+        }
+    }
+}
+
+impl From<Value> for Rc<RefCell<Value>> {
+    fn from(val: Value) -> Self {
+        Rc::new(RefCell::new(val))
+    }
+}
+
 impl Value {
-    pub fn get_this(&self) -> Option<Value> {
+    pub fn get_this(&self) -> Option<Rc<RefCell<Value>>> {
         if let Value::Fn { this, .. } = self {
-            this.clone().as_deref().cloned()
+            this.clone()
         } else {
             None
         }
@@ -49,9 +89,33 @@ impl Value {
         }
     }
 
-    pub fn get_properties(&self) -> Option<&HashMap<String, Value>> {
+    pub fn get_properties(&self) -> Option<&HashMap<String, Rc<RefCell<Value>>>> {
         if let Value::ClassInstance { properties, .. } = self {
             Some(properties)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_properties_mut(&mut self) -> Option<&mut HashMap<String, Rc<RefCell<Value>>>> {
+        if let Value::ClassInstance { properties, .. } = self {
+            Some(properties)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_class(&self) -> Option<Rc<RefCell<Value>>> {
+        if let Value::ClassInstance { class, .. } = self {
+            Some(class.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_methods(&self) -> Option<&HashMap<String, Rc<RefCell<Value>>>> {
+        if let Value::Class { methods, .. } = self {
+            Some(methods)
         } else {
             None
         }
@@ -83,8 +147,8 @@ pub enum EvalErrorType {
     OperandsMustBeTwoNumbersOrTwoStrings,
     #[error("Undefined variable")]
     UndefinedVariable,
-    #[error("Undefined variable or function")]
-    UndefinedVariableOrFunction,
+    #[error("Undefined reference")]
+    UndefinedReference,
     #[error("Undefined primitive function")]
     UndefinedPrimitiveFunction,
     #[error("Undefined function")]
@@ -132,145 +196,136 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Fn { name, .. } => write!(f, "<fn {name}>"),
             Value::Class { name, .. } => write!(f, "{name}"),
-            Value::ClassInstance { class, .. } => write!(f, "{class} instance"),
+            Value::ClassInstance { class, .. } => write!(f, "{} instance", class.borrow()),
         }
     }
 }
 
-pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, EvalError> {
+pub fn eval_expr(
+    expr: &Expr,
+    interpreter: &mut Interpreter,
+) -> Result<Rc<RefCell<Value>>, EvalError> {
     match expr {
-        Expr::Literal(literal_expr) => match literal_expr {
+        Expr::Literal(literal_expr) => Ok(match literal_expr {
             crate::parser::LiteralExpr::Lit(literal) => match literal {
-                crate::lexer::Literal::Number(n) => Ok(Value::Number(*n)),
-                crate::lexer::Literal::String(s) => Ok(Value::String(s.clone())),
+                crate::lexer::Literal::Number(n) => Value::Number(*n),
+                crate::lexer::Literal::String(s) => Value::String(s.clone()),
             },
-            crate::parser::LiteralExpr::True => Ok(Value::Bool(true)),
-            crate::parser::LiteralExpr::False => Ok(Value::Bool(false)),
-            crate::parser::LiteralExpr::Nil => Ok(Value::Nil),
-        },
+            crate::parser::LiteralExpr::True => Value::Bool(true),
+            crate::parser::LiteralExpr::False => Value::Bool(false),
+            crate::parser::LiteralExpr::Nil => Value::Nil,
+        }
+        .into()),
         Expr::Unary(token, expr) => match token.token_type {
             TokenType::Minus => {
-                if let Value::Number(n) = eval_expr(expr, interpreter)? {
-                    Ok(Value::Number(-n))
+                if let Value::Number(n) = &*eval_expr(expr, interpreter)?.borrow() {
+                    Ok(Value::Number(-n).into())
                 } else {
                     eval_error(token, OperandMustBeANumber)
                 }
             }
-            TokenType::Bang => match eval_expr(expr, interpreter)? {
-                Value::Bool(false) | Value::Nil => Ok(Value::Bool(true)),
-                _ => Ok(Value::Bool(false)),
+            TokenType::Bang => match &*eval_expr(expr, interpreter)?.borrow() {
+                Value::Bool(false) | Value::Nil => Ok(Value::Bool(true).into()),
+                _ => Ok(Value::Bool(false).into()),
             },
             _ => eval_error(token, IvalidOperator),
         },
-        Expr::Binary(expr, token, expr1) => match &token.token_type {
-            TokenType::Plus => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                match (left, right) {
-                    (Value::Number(l), Value::Number(r)) => Ok(Value::Number(l + r)),
-                    (Value::String(l), Value::String(r)) => {
-                        Ok(Value::String(format!("{}{}", l, r)))
+        Expr::Binary(expr, token, expr1) => {
+            let left = eval_expr(expr, interpreter)?;
+            let right = eval_expr(expr1, interpreter)?;
+            Ok(match &token.token_type {
+                TokenType::Plus => match (&*left.borrow(), &*right.borrow()) {
+                    (Value::Number(l), Value::Number(r)) => Value::Number(l + r),
+                    (Value::String(l), Value::String(r)) => Value::String(format!("{}{}", l, r)),
+                    _ => eval_error(token, OperandsMustBeTwoNumbersOrTwoStrings)?,
+                },
+                TokenType::Minus => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        Value::Number(l - r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
                     }
-                    _ => eval_error(token, OperandsMustBeTwoNumbersOrTwoStrings),
                 }
-            }
-            TokenType::Minus => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    Ok(Value::Number(l - r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
-                }
-            }
-
-            TokenType::Star => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    Ok(Value::Number(l * r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
-                }
-            }
-            TokenType::Slash => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    if r == 0.0 {
-                        return eval_error(token, IvalidOperator);
+                TokenType::Star => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        Value::Number(l * r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
                     }
-                    Ok(Value::Number(l / r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
                 }
-            }
-            TokenType::EqualEqual => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                match (left, right) {
-                    (Value::Number(l), Value::Number(r)) => Ok(Value::Bool(l == r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l == r)),
-                    (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l == r)),
-                    _ => Ok(Value::Bool(false)),
+                TokenType::Slash => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        if *r == 0.0 {
+                            return eval_error(token, IvalidOperator)?;
+                        }
+                        Value::Number(l / r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
+                    }
                 }
-            }
-            TokenType::BangEqual => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                match (left, right) {
-                    (Value::Number(l), Value::Number(r)) => Ok(Value::Bool(l != r)),
-                    (Value::String(l), Value::String(r)) => Ok(Value::Bool(l != r)),
-                    (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l != r)),
-                    _ => Ok(Value::Bool(true)),
+                TokenType::EqualEqual => match (&*left.borrow(), &*right.borrow()) {
+                    (Value::Number(l), Value::Number(r)) => Value::Bool(l == r),
+                    (Value::String(l), Value::String(r)) => Value::Bool(l == r),
+                    (Value::Bool(l), Value::Bool(r)) => Value::Bool(l == r),
+                    _ => Value::Bool(false),
+                },
+                TokenType::BangEqual => match (&*left.borrow(), &*right.borrow()) {
+                    (Value::Number(l), Value::Number(r)) => Value::Bool(l != r),
+                    (Value::String(l), Value::String(r)) => Value::Bool(l != r),
+                    (Value::Bool(l), Value::Bool(r)) => Value::Bool(l != r),
+                    _ => Value::Bool(true),
+                },
+                TokenType::Greater => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        Value::Bool(l > r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
+                    }
                 }
-            }
-            TokenType::Greater => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    Ok(Value::Bool(l > r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
+                TokenType::GreaterEqual => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        Value::Bool(l >= r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
+                    }
                 }
-            }
-            TokenType::GreaterEqual => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    Ok(Value::Bool(l >= r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
+                TokenType::Less => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        Value::Bool(l < r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
+                    }
                 }
-            }
-            TokenType::Less => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    Ok(Value::Bool(l < r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
+                TokenType::LessEqual => {
+                    if let (Value::Number(l), Value::Number(r)) =
+                        (&*left.borrow(), &*right.borrow())
+                    {
+                        Value::Bool(l <= r)
+                    } else {
+                        eval_error(token, OperandsMustBeNumbers)?
+                    }
                 }
+                _ => eval_error(token, IvalidOperator)?,
             }
-            TokenType::LessEqual => {
-                let left = eval_expr(expr, interpreter)?;
-                let right = eval_expr(expr1, interpreter)?;
-                if let (Value::Number(l), Value::Number(r)) = (left, right) {
-                    Ok(Value::Bool(l <= r))
-                } else {
-                    eval_error(token, OperandsMustBeNumbers)
-                }
-            }
-            _ => eval_error(token, IvalidOperator),
-        },
-        Expr::Grouping(expr) => eval_expr(expr, interpreter),
-        Expr::Name(token, address) => {
-            if let Some(value) = interpreter.get_var_by_address(token, address) {
-                Ok(value.clone())
-            } else {
-                eval_error(token, UndefinedVariableOrFunction)
-            }
+            .into())
         }
+        Expr::Grouping(expr) => eval_expr(expr, interpreter),
+        Expr::Name(token, address) => match interpreter.get_var_by_address(token, address) {
+            Some(value) => Ok(value),
+            None => eval_error(token, UndefinedReference),
+        },
         Expr::Assign(lhs, expr) => match lhs.as_ref() {
             Expr::Name(ref token, ref address) => {
                 let result = eval_expr(expr, interpreter)?;
@@ -280,37 +335,38 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
                 Ok(result)
             }
             Expr::Dotted(ref _token, ref head, ref tail) => {
-                let mut instance @ Value::ClassInstance { .. } = eval_expr(head, interpreter)?
-                else {
-                    todo!();
-                };
-                let Expr::Name(left_token, left_address) = head.as_ref() else {
-                    todo!();
-                };
-
-                let Expr::Name(right_token, _) = tail.as_ref() else {
-                    todo!();
-                };
-
+                let class_instance = eval_expr(head, interpreter)?;
                 let rhs = eval_expr(expr, interpreter)?;
-                if let Value::ClassInstance {
-                    ref mut properties, ..
-                } = &mut instance
-                {
-                    properties.insert(right_token.lexeme.clone(), rhs.clone());
-                } else {
-                    todo!()
+                match tail.as_ref() {
+                    Expr::Literal(_)
+                    | Expr::Unary(_, _)
+                    | Expr::Binary(_, _, _)
+                    | Expr::Logical(_, _, _)
+                    | Expr::Assign(_, _)
+                    | Expr::Grouping(_)
+                    | Expr::Call(_, _, _) => todo!("Can't be"),
+                    Expr::Name(token, _) => {
+                        class_instance
+                            .borrow_mut()
+                            .get_properties_mut()
+                            .unwrap()
+                            .insert(token.lexeme.clone(), rhs.clone());
+                        Ok(rhs)
+                    }
+                    Expr::Dotted(_, _, _) => {
+                        todo!()
+                    }
+                    Expr::This(_) => todo!(),
                 }
-                if !interpreter.assign_var(left_token, left_address, instance.clone()) {
-                    return eval_error(left_token, UndefinedVariable);
-                }
-                Ok(rhs.clone())
             }
             _ => todo!("Invalid assingee"),
         },
         Expr::Logical(expr1, operator, expr2) => {
             let result1 = eval_expr(expr1, interpreter)?;
-            match (result1.clone(), operator.lexeme.as_str()) {
+            match (
+                &*eval_expr(expr1, interpreter)?.borrow(),
+                operator.lexeme.as_str(),
+            ) {
                 (Value::Nil | Value::Bool(false), "or") => Ok(eval_expr(expr2, interpreter)?),
                 (_, "or") => Ok(result1),
                 (Value::Nil | Value::Bool(false), "and") => Ok(result1),
@@ -323,22 +379,30 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
         Expr::Call(callee, token, args) => {
             let mut call_args = vec![];
             for expr in args {
-                call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
+                call_args.push((expr, eval_expr(expr, interpreter)?))
             }
-            match eval_expr(callee, interpreter)? {
-                Value::Fn { name, .. } | Value::Class { name, .. } if is_primitive(&name) => {
-                    eval_primitive_function(&name, token)
+            let callable = eval_expr(callee, interpreter)?;
+            match &*eval_expr(callee, interpreter)?.borrow() {
+                Value::Fn { name, .. } | Value::Class { name, .. } if is_primitive(name) => {
+                    eval_primitive_function(name, token)
                 }
                 Value::Fn { .. } => {
-                    interpreter.call(&Callable::Expr(*callee.clone()), call_args, None, token)
+                    interpreter.call(&Callable::Function(callable), &call_args, None, token)
                 }
-                val @ Value::Class { .. } => {
-                    interpreter.call(&Callable::Class(val), call_args, None, token)
+                Value::Class { .. } => {
+                    interpreter.call(&Callable::Class(callable), &call_args, None, token)
                 }
-                _ => eval_error(token, CantCallThis)?,
+                _ => eval_error(token, UndefinedFunction)?,
             }
         }
-        Expr::Dotted(_, ref head, ref tail) => eval_expr_in_class_instance(tail, head, interpreter),
+        Expr::Dotted(_, ref head, ref tail) => {
+            let class_instance = eval_expr(head, interpreter)?;
+            Ok(eval_expr_in_class_instance(
+                class_instance,
+                tail,
+                interpreter,
+            )?)
+        }
         Expr::This(token) => interpreter
             .get_this()
             .map_or(eval_error(token, InvalidReferenceToThis), Result::Ok),
@@ -346,70 +410,84 @@ pub fn eval_expr(expr: &Expr, interpreter: &mut Interpreter) -> Result<Value, Ev
 }
 
 fn eval_expr_in_class_instance(
-    tail: &Expr,
-    head: &Expr,
+    class_instance: Rc<RefCell<Value>>,
+    expr: &Expr,
     interpreter: &mut Interpreter,
-) -> Result<Value, EvalError> {
-    let instance @ Value::ClassInstance { class, properties } = &eval_expr(head, interpreter)?
-    else {
-        todo!("Can't be");
-    };
-    let Value::Class { methods, .. } = class.as_ref() else {
-        todo!()
-    };
-    match tail {
+) -> Result<Rc<RefCell<Value>>, EvalError> {
+    match expr {
         Expr::Literal(_)
         | Expr::Unary(_, _)
         | Expr::Binary(_, _, _)
         | Expr::Logical(_, _, _)
-        | Expr::Assign(_, _) => todo!("Can't be"),
-        Expr::Grouping(expr) => eval_expr_in_class_instance(expr, head, interpreter),
-        Expr::Name(token, _) => properties
-            .get(&token.lexeme)
-            .cloned()
-            .or(
-                if let Some(mut method) = methods.get(&token.lexeme).cloned() {
-                    if let Value::Fn { this, .. } = &mut method {
-                        *this = Some(Box::new(instance.clone()));
-                        Some(method)
-                    } else {
-                        None
+        | Expr::Assign(_, _)
+        | Expr::Grouping(_) => todo!("Can't be"),
+        Expr::Name(token, _) => {
+            if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
+                match properties.get(&token.lexeme) {
+                    Some(property) => Ok(property.clone()),
+                    None => {
+                        if let Value::Class { methods, .. } = &*class.borrow() {
+                            match methods.get(&token.lexeme) {
+                                Some(method) => {
+                                    let mut new_bound_function = method.borrow().clone();
+                                    if let Value::Fn { this, .. } = &mut new_bound_function {
+                                        let _ = this.insert(class_instance.clone());
+                                    }
+                                    Ok(new_bound_function.into())
+                                }
+                                None => eval_error(token, UndefinedField)?,
+                            }
+                        } else {
+                            todo!()
+                        }
                     }
-                } else {
-                    None
-                },
-            )
-            .map_or_else(|| eval_error(token, UndefinedField), Result::Ok),
+                }
+            } else {
+                todo!()
+            }
+        }
         Expr::Call(callee, token, args_exprs) => {
             let callable = match callee.as_ref() {
-                Expr::Name(callee, _) => {
-                    let Some(mut method) = methods.get(&callee.lexeme).cloned() else {
-                        return eval_error(callee, UndefinedMethod);
-                    };
-                    if let Value::Fn { this, .. } = &mut method {
-                        *this = Some(Box::new(instance.clone()));
+                Expr::Name(callee_token, _) => {
+                    if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
+                        let mut method = properties.get(&callee_token.lexeme).cloned();
+                        if method.is_none() {
+                            if let Value::Class { methods, .. } = &*class.borrow() {
+                                if let Some(class_method) = methods.get(&callee_token.lexeme) {
+                                    let mut new_bound_function = class_method.borrow().clone();
+                                    if let Value::Fn { this, .. } = &mut new_bound_function {
+                                        let _ = this.insert(class_instance.clone());
+                                    }
+                                    let _ = method.insert(new_bound_function.into());
+                                }
+                            } else {
+                                todo!()
+                            }
+                        }
+                        match method {
+                            Some(method) => Callable::Method(method.clone()),
+                            None => {
+                                return eval_error(callee_token, UndefinedMethod);
+                            }
+                        }
+                    } else {
+                        todo!()
                     }
-                    if let Some(overridden_method @ Value::Fn { .. }) =
-                        properties.get(&callee.lexeme)
-                    {
-                        method = overridden_method.clone();
-                    }
-                    Callable::Method(method)
                 }
                 Expr::Call(sub_callee, sub_token, sub_args_exprs) => {
                     let mut call_args = vec![];
                     for expr in sub_args_exprs {
-                        call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
+                        call_args.push((expr, eval_expr(expr, interpreter)?))
                     }
                     let method = &Callable::Method(eval_expr_in_class_instance(
+                        class_instance.clone(),
                         sub_callee,
-                        head,
                         interpreter,
                     )?);
                     Callable::Method(interpreter.call(
                         method,
-                        call_args,
-                        Some(instance.clone()),
+                        &call_args,
+                        Some(class_instance.clone()),
                         sub_token,
                     )?)
                 }
@@ -417,9 +495,9 @@ fn eval_expr_in_class_instance(
             };
             let mut call_args = vec![];
             for expr in args_exprs {
-                call_args.push((expr.clone(), eval_expr(expr, interpreter)?))
+                call_args.push((expr, eval_expr(expr, interpreter)?))
             }
-            interpreter.call(&callable, call_args, Some(instance.clone()), token)
+            interpreter.call(&callable, &call_args, Some(class_instance.clone()), token)
         }
         Expr::Dotted(_, _, _) => {
             todo!()
@@ -428,14 +506,15 @@ fn eval_expr_in_class_instance(
     }
 }
 
-fn eval_primitive_function(callee: &str, token: &Token) -> Result<Value, EvalError> {
+fn eval_primitive_function(callee: &str, token: &Token) -> Result<Rc<RefCell<Value>>, EvalError> {
     match callee {
         "clock" => Ok(Value::Number(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as f64,
-        )),
+        )
+        .into()),
         _ => eval_error(token, UndefinedPrimitiveFunction),
     }
 }
@@ -450,9 +529,8 @@ fn is_primitive(callee: &str) -> bool {
 
 pub fn eval_ast(ast: &Ast) -> Result<Value, EvalError> {
     match ast {
-        Ast::Expr(expr) => eval_expr(
-            expr,
-            &mut Interpreter::new(&Statement::Block(vec![]), HashMap::new()),
-        ),
+        Ast::Expr(expr) => Ok(eval_expr(expr, &mut Interpreter::new(&HashMap::new()))?
+            .borrow()
+            .clone()),
     }
 }

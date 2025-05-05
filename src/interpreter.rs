@@ -15,63 +15,62 @@ pub enum RuntimeError {
     #[error(transparent)]
     EvalError(#[from] EvalError),
     #[error("No error")]
-    EarlyExit(Box<Value>),
+    EarlyExit(Rc<RefCell<Value>>),
 }
 
 #[derive(Default)]
 pub struct Environment {
     parent: Option<Rc<RefCell<Environment>>>,
-    values: HashMap<String, Value>,
-    this: Option<Value>,
+    values: HashMap<String, Rc<RefCell<Value>>>,
+    this: Option<Rc<RefCell<Value>>>,
 }
 
 impl Debug for Environment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Environment")
+            .field("values", &self.values.keys())
             .field(
                 "parent_addr",
                 &self.parent.as_ref().map(|this| this.as_ptr()),
             )
             .field("parent", &self.parent)
-            .field("values", &self.values)
             .finish()
     }
 }
 
 pub enum Callable {
-    Expr(Expr),
-    Class(Value),
-    Method(Value),
+    Class(Rc<RefCell<Value>>),
+    Method(Rc<RefCell<Value>>),
+    Function(Rc<RefCell<Value>>),
 }
 
-pub struct Interpreter {
-    pub program: Program,
+pub struct Interpreter<'a> {
     pub current_environment: Rc<RefCell<Environment>>,
     pub n_environments: usize,
-    pub resolution_table: HashMap<String, usize>,
+    pub resolution_table: &'a HashMap<String, usize>,
 }
 
 impl Environment {
     pub fn new_with_builtin_functions(builtins: &[&str]) -> Self {
-        Self {
-            values: HashMap::from_iter(builtins.iter().map(|function| {
-                (
-                    function.to_string(),
-                    Value::Fn {
-                        name: function.to_string(),
-                        formal_args: vec![],
-                        body: Statement::Block(vec![]),
-                        environment: Default::default(),
-                        this: None,
-                    },
-                )
-            })),
-            parent: Default::default(),
-            this: None,
+        let mut new_env = Self::default();
+        for builtin in builtins {
+            new_env.set(
+                builtin,
+                Value::Fn {
+                    name: builtin.to_string(),
+                    formal_args: vec![],
+                    body: Statement::Block(vec![]),
+                    environment: Default::default(),
+                    this: None,
+                }
+                .into(),
+                true,
+            );
         }
+        new_env
     }
 
-    pub fn get(&self, name: &str) -> Option<Value> {
+    pub fn get(&self, name: &str) -> Option<Rc<RefCell<Value>>> {
         if let Some(value) = self.values.get(name) {
             Some(value.clone())
         } else if let Some(environment) = self.parent.as_ref() {
@@ -81,24 +80,21 @@ impl Environment {
         }
     }
 
-    pub fn set(&mut self, name: &str, new_value: Value, new: bool) -> bool {
-        if new {
+    pub fn set(&mut self, name: &str, new_value: Rc<RefCell<Value>>, new: bool) -> bool {
+        if new || self.values.contains_key(name) {
             self.values.insert(name.to_string(), new_value);
-        } else if let Some(old_value) = self.values.get_mut(name) {
-            *old_value = new_value;
+            true
         } else if let Some(environment) = &self.parent {
-            environment.borrow_mut().set(name, new_value, new);
+            environment.borrow_mut().set(name, new_value, new)
         } else {
-            return false;
+            false
         }
-        true
     }
 }
 
-impl Interpreter {
-    pub fn new(program: &Program, resolution_table: HashMap<String, usize>) -> Self {
+impl<'a> Interpreter<'a> {
+    pub fn new(resolution_table: &'a HashMap<String, usize>) -> Self {
         Self {
-            program: program.clone(),
             current_environment: Rc::new(RefCell::new(Environment::new_with_builtin_functions(&[
                 "clock",
             ]))),
@@ -107,7 +103,7 @@ impl Interpreter {
         }
     }
 
-    pub fn get_var_by_address(&self, token: &Token, address: &str) -> Option<Value> {
+    pub fn get_var_by_address(&self, token: &Token, address: &str) -> Option<Rc<RefCell<Value>>> {
         let depth = match self.resolution_table.get(address) {
             Some(depth) => *depth,
             None => usize::MAX,
@@ -148,7 +144,7 @@ impl Interpreter {
         return_value
     }
 
-    pub fn set_var(&mut self, name: &str, value: Value, new: bool) -> bool {
+    pub fn set_var(&mut self, name: &str, value: Rc<RefCell<Value>>, new: bool) -> bool {
         self.current_environment.borrow_mut().set(name, value, new)
     }
 
@@ -168,21 +164,21 @@ impl Interpreter {
         return_value
     }
 
-    fn set_var_at_depth(&mut self, name: &str, value: Value, depth: usize) -> bool {
+    fn set_var_at_depth(&mut self, name: &str, value: Rc<RefCell<Value>>, depth: usize) -> bool {
         self.find_environment(depth)
             .borrow_mut()
             .set(name, value, false)
     }
 
-    fn get_var_at_depth(&self, name: &str, depth: usize) -> Option<Value> {
+    fn get_var_at_depth(&self, name: &str, depth: usize) -> Option<Rc<RefCell<Value>>> {
         self.find_environment(depth).borrow().get(name)
     }
 
-    fn get_var(&self, name: &str) -> Option<Value> {
+    fn get_var(&self, name: &str) -> Option<Rc<RefCell<Value>>> {
         self.current_environment.borrow().get(name)
     }
 
-    pub fn assign_var(&mut self, token: &Token, address: &str, value: Value) -> bool {
+    pub fn assign_var(&mut self, token: &Token, address: &str, value: Rc<RefCell<Value>>) -> bool {
         let depth = match self.resolution_table.get(address) {
             Some(depth) => *depth,
             None => usize::MAX,
@@ -197,7 +193,7 @@ impl Interpreter {
                 Ok(())
             }
             Statement::Print(expr) => {
-                println!("{}", &eval_expr(expr, self)?);
+                println!("{}", eval_expr(expr, self)?.borrow());
                 Ok(())
             }
             Statement::Block(declarations) => {
@@ -209,8 +205,10 @@ impl Interpreter {
                 Ok(())
             }
             Statement::If(condition, if_statement, else_statement) => {
-                let condition = &eval_expr(condition, self)?;
-                if !matches!(condition, Value::Bool(false) | Value::Nil) {
+                if !matches!(
+                    &*eval_expr(condition, self)?.borrow(),
+                    Value::Bool(false) | Value::Nil
+                ) {
                     self.statement(if_statement)?;
                 } else if let Some(else_statement) = else_statement {
                     self.statement(else_statement)?;
@@ -219,13 +217,13 @@ impl Interpreter {
             }
             Statement::While(while_condition, statement) => {
                 let mut condition = eval_expr(while_condition, self)?;
-                while !matches!(condition, Value::Bool(false) | Value::Nil) {
+                while !matches!(&*condition.borrow(), Value::Bool(false) | Value::Nil) {
                     self.statement(statement)?;
                     condition = eval_expr(while_condition, self)?;
                 }
                 Ok(())
             }
-            Statement::Return(token, expr) => Err(RuntimeError::EarlyExit(Box::new(
+            Statement::Return(token, expr) => Err(RuntimeError::EarlyExit(
                 eval_expr(
                     expr.as_ref()
                         .unwrap_or(&Expr::Literal(crate::parser::LiteralExpr::Nil)),
@@ -235,7 +233,7 @@ impl Interpreter {
                     err.set_token(token);
                     err
                 })?,
-            ))),
+            )),
         }
     }
 
@@ -248,7 +246,7 @@ impl Interpreter {
                         self.set_var(&ident_token.lexeme, value_to_insert, true);
                     }
                     None => {
-                        self.set_var(&ident_token.lexeme, Value::Nil, true);
+                        self.set_var(&ident_token.lexeme, Value::Nil.into(), true);
                     }
                 }
                 Ok(())
@@ -263,7 +261,8 @@ impl Interpreter {
                         body: body.clone(),
                         environment: self.current_environment.clone(),
                         this: None,
-                    },
+                    }
+                    .into(),
                     true,
                 );
                 Ok(())
@@ -283,7 +282,8 @@ impl Interpreter {
                                 body: body.clone(),
                                 environment: self.current_environment.clone(),
                                 this: None,
-                            },
+                            }
+                            .into(),
                         );
                     }
                 }
@@ -292,7 +292,8 @@ impl Interpreter {
                     Value::Class {
                         name: name.lexeme.clone(),
                         methods,
-                    },
+                    }
+                    .into(),
                     true,
                 );
                 Ok(())
@@ -300,36 +301,39 @@ impl Interpreter {
         }
     }
 
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
-        self.statement(&self.program.clone())
+    pub fn run(&mut self, program: &Program) -> Result<(), RuntimeError> {
+        self.statement(program)
     }
 
     pub fn call(
         &mut self,
         callable: &Callable,
-        call_args: Vec<(Expr, Value)>,
-        this: Option<Value>,
+        call_args: &[(&Expr, Rc<RefCell<Value>>)],
+        this: Option<Rc<RefCell<Value>>>,
         token: &Token,
-    ) -> Result<Value, EvalError> {
+    ) -> Result<Rc<RefCell<Value>>, EvalError> {
         let callee = match callable {
-            Callable::Expr(expr) => eval_expr(expr, self)?,
-            Callable::Class(val @ Value::Class { .. })
-            | Callable::Method(val @ Value::Fn { .. }) => val.clone(),
+            Callable::Class(val) | Callable::Method(val) | Callable::Function(val)
+                if matches!(&*val.borrow(), Value::Class { .. } | Value::Fn { .. }) =>
+            {
+                val.clone()
+            }
             _ => todo!(),
         };
         let Value::Fn {
-            name,
             formal_args,
             body,
             environment,
             this: fn_this,
-        } = callee
+            ..
+        } = &*callee.borrow()
         else {
-            if let class @ Value::Class { .. } = &callee {
+            if let Value::Class { .. } = &*callee.borrow() {
                 return Ok(Value::ClassInstance {
-                    class: Box::new(class.clone()),
+                    class: callee.clone(),
                     properties: HashMap::new(),
-                });
+                }
+                .into());
             } else {
                 return eval_error(token, EvalErrorType::UndefinedFunction)?;
             }
@@ -346,7 +350,7 @@ impl Interpreter {
 
         let old_environment = self.current_environment.clone();
         if !matches!(callable, Callable::Method(_)) {
-            self.set_environment(environment);
+            self.set_environment(environment.clone());
         }
         let mut new_env = Environment::default();
         for (var_token, var_value) in zip(
@@ -354,13 +358,13 @@ impl Interpreter {
             call_args
                 .iter()
                 .cloned()
-                .unzip::<Expr, Value, Vec<_>, Vec<_>>()
+                .unzip::<&Expr, Rc<RefCell<Value>>, Vec<_>, Vec<_>>()
                 .1,
         ) {
-            new_env.set(&var_token.lexeme, var_value, true);
+            new_env.set(&var_token.lexeme, var_value.clone(), true);
         }
         if matches!(callable, Callable::Method(_)) {
-            new_env.this = if let Some(this) = fn_this.as_deref() {
+            new_env.this = if let Some(this) = fn_this {
                 Some(this.clone())
             } else {
                 this
@@ -369,15 +373,15 @@ impl Interpreter {
         self.add_environment(new_env);
 
         let env_before_running = self.current_environment.clone();
-        let mut return_value = Value::Nil;
+        let mut return_value = Value::Nil.into();
         for declaration in &declarations {
             match self.declaration(declaration) {
                 Err(RuntimeError::EvalError(e)) => {
                     return Err(e);
                 }
                 Err(RuntimeError::EarlyExit(val)) => {
-                    self.current_environment = env_before_running.clone();
-                    return_value = *val;
+                    self.set_environment(env_before_running.clone());
+                    return_value = val;
                     break;
                 }
                 _ => {}
@@ -390,40 +394,28 @@ impl Interpreter {
             call_args
                 .iter()
                 .cloned()
-                .unzip::<Expr, Value, Vec<_>, Vec<_>>()
+                .unzip::<&Expr, Rc<RefCell<Value>>, Vec<_>, Vec<_>>()
                 .0,
             formal_args.clone(),
         ) {
-            if let Some(val @ Value::ClassInstance { .. }) = self.get_var(&formal_arg.lexeme) {
-                values_to_update.push((expr, val.clone()));
+            if let Some(val) = self.get_var(&formal_arg.lexeme) {
+                if matches!(&*val.borrow(), Value::ClassInstance { .. }) {
+                    values_to_update.push((expr, val.clone()));
+                }
             }
         }
 
         self.pop_environment();
 
         if !matches!(callable, Callable::Method(_)) {
-            let fn_environment = self.pop_environment();
             self.set_environment(old_environment);
-            if let Callable::Expr(Expr::Name(ref t, ref address)) = callable {
-                self.assign_var(
-                    t,
-                    address,
-                    Value::Fn {
-                        environment: fn_environment,
-                        name,
-                        formal_args,
-                        body,
-                        this: fn_this,
-                    },
-                );
-            }
         }
 
         for (expr, value) in values_to_update {
             if let Expr::Name(token, address) = expr {
-                self.assign_var(&token, &address, value);
+                self.assign_var(token, address, value);
             } else if let Expr::Dotted(_, left, _) = expr {
-                if let Expr::Name(token, address) = &*left {
+                if let Expr::Name(token, address) = left.as_ref() {
                     self.assign_var(token, address, value);
                 }
             }
@@ -432,8 +424,7 @@ impl Interpreter {
         Ok(return_value)
     }
 
-    pub fn get_this(&self) -> Option<Value> {
-        // TODO: review all the cloning around
+    pub fn get_this(&self) -> Option<Rc<RefCell<Value>>> {
         let mut cur_env = self.current_environment.clone();
         let mut this = cur_env.borrow().this.clone();
         while this.is_none() && cur_env.borrow().parent.is_some() {

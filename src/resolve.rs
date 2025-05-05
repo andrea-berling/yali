@@ -62,7 +62,7 @@ impl Resolver {
         self.scopes.pop_front().unwrap_or_default()
     }
 
-    pub fn resolve(&mut self, program: &Program) -> Result<HashMap<String, usize>, ResolvingError> {
+    pub fn resolve(mut self, program: &Program) -> Result<HashMap<String, usize>, ResolvingError> {
         let Statement::Block(declarations) = program else {
             return resolving_error(
                 &Token {
@@ -77,7 +77,7 @@ impl Resolver {
         for declaration in declarations {
             self.resolve_declaration(declaration)?;
         }
-        Ok(self.resolved_expressions.clone())
+        Ok(self.resolved_expressions)
     }
 
     fn resolve_name(&self, token: &Token) -> Option<(usize, bool)> {
