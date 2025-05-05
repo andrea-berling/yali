@@ -321,19 +321,31 @@ impl<'a> Interpreter<'a> {
             _ => todo!(),
         };
         let Value::Fn {
+            name: callable_name,
             formal_args,
             body,
             environment,
             this: fn_this,
-            ..
         } = &*callee.borrow()
         else {
-            if let Value::Class { .. } = &*callee.borrow() {
-                return Ok(Value::ClassInstance {
+            if let Value::Class { methods, .. } = &*callee.borrow() {
+                let new_instance: Rc<RefCell<Value>> = Value::ClassInstance {
                     class: callee.clone(),
                     properties: HashMap::new(),
                 }
-                .into());
+                .into();
+
+                if let Some(initializer) = methods.get("init") {
+                    if matches!(&*initializer.borrow(), Value::Fn { .. }) {
+                        self.call(
+                            &Callable::Method(initializer.clone()),
+                            call_args,
+                            Some(new_instance.clone()),
+                            token,
+                        )?;
+                    }
+                }
+                return Ok(new_instance);
             } else {
                 return eval_error(token, EvalErrorType::UndefinedFunction)?;
             }
@@ -386,6 +398,14 @@ impl<'a> Interpreter<'a> {
                 }
                 _ => {}
             };
+        }
+
+        if matches!(callable, Callable::Method(_)) && callable_name == "init" {
+            return_value = if let Some(this) = fn_this {
+                this.clone()
+            } else {
+                self.current_environment.borrow().this.clone().unwrap()
+            }
         }
 
         let mut values_to_update = vec![];
