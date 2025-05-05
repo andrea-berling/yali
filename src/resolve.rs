@@ -17,6 +17,8 @@ pub enum ResolvingErrorType {
     InvalidReturn,
     #[error("Can't use 'this' outside of a class")]
     UseOfThisOutsideOfClass,
+    #[error("Can't return a value from an initializer")]
+    InvalidReturnInConstructor,
 }
 
 use ResolvingErrorType::*;
@@ -42,6 +44,7 @@ pub struct Resolver {
     scopes: VecDeque<Scope>,
     in_function_scope: bool,
     in_class_scope: bool,
+    in_class_constructor: bool,
 }
 
 impl Resolver {
@@ -51,6 +54,7 @@ impl Resolver {
             scopes: VecDeque::new(),
             in_function_scope: false,
             in_class_scope: false,
+            in_class_constructor: false,
         }
     }
 
@@ -132,6 +136,9 @@ impl Resolver {
                     return resolving_error(token, NameRebound);
                 }
                 self.declare(token);
+                if self.in_class_scope && token.lexeme == "init" {
+                    self.in_class_constructor = true;
+                }
                 let Statement::Block(body) = statement else {
                     todo!()
                 };
@@ -152,6 +159,9 @@ impl Resolver {
                 self.pop_scope();
                 self.in_function_scope = old_in_function_scope;
                 self.define(token);
+                if token.lexeme == "init" && self.in_class_constructor {
+                    self.in_class_constructor = false;
+                }
             }
             Declaration::Class(token, statement) => {
                 self.in_class_scope = true;
@@ -238,6 +248,9 @@ impl Resolver {
                     return resolving_error(t, InvalidReturn);
                 }
                 if let Some(expr) = expr {
+                    if self.in_class_constructor {
+                        return resolving_error(t, InvalidReturnInConstructor);
+                    }
                     self.resolve_expr(expr)?;
                 }
             }
