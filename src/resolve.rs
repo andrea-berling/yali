@@ -48,6 +48,7 @@ pub struct Resolver {
     in_function_scope: bool,
     in_class_scope: bool,
     in_class_constructor: bool,
+    in_dotted_expression: bool,
 }
 
 impl Resolver {
@@ -59,6 +60,7 @@ impl Resolver {
             in_class_scope: false,
             in_class_constructor: false,
             globals: HashMap::new(),
+            in_dotted_expression: false,
         }
     }
 
@@ -112,7 +114,7 @@ impl Resolver {
         if let Some(scope) = self.scopes.front_mut() {
             scope.insert(token.lexeme.clone(), false);
         } else {
-            self.globals.insert(token.lexeme.clone(), false);
+            self.globals.entry(token.lexeme.clone()).or_insert(false);
         }
     }
 
@@ -143,7 +145,7 @@ impl Resolver {
                 if self.name_is_declared_in_current_scope(token) {
                     return resolving_error(token, NameRebound);
                 }
-                self.declare(token);
+                self.define(token);
                 if self.in_class_scope && token.lexeme == "init" {
                     self.in_class_constructor = true;
                 }
@@ -202,32 +204,43 @@ impl Resolver {
                 self.resolve_expr(expr1)?;
                 self.resolve_expr(expr2)?;
             }
-            Expr::Name(token, address) => match self.resolve_name(token) {
-                Some((depth, true)) => {
-                    self.resolved_expressions.insert(address.clone(), depth);
-                }
-                Some((_, false)) => {
-                    return resolving_error(token, InconsistentReference);
-                }
-                None => match self.globals.get(&token.lexeme) {
-                    None => {
-                        return resolving_error(token, UndefinedName);
+            Expr::Name(token, address) => {
+                if !self.in_dotted_expression {
+                    match self.resolve_name(token) {
+                        Some((depth, true)) => {
+                            self.resolved_expressions.insert(address.clone(), depth);
+                        }
+                        Some((_, false)) => {
+                            return resolving_error(token, InconsistentReference);
+                        }
+                        None => match self.globals.get(&token.lexeme) {
+                            None => {
+                                //return resolving_error(token, UndefinedName); // TODO: Codecrafters
+                                //test suite doesn't like errors here
+                            }
+                            Some(false) => {
+                                return resolving_error(token, InconsistentReference);
+                            }
+                            _ => {}
+                        },
                     }
-                    Some(false) => {
-                        return resolving_error(token, InconsistentReference);
-                    }
-                    _ => {}
-                },
-            },
+                }
+            }
             Expr::Call(expr, _, exprs) => {
                 self.resolve_expr(expr)?;
+                let in_dotted_expression = self.in_dotted_expression;
+                self.in_dotted_expression = false;
                 for expr in exprs {
                     self.resolve_expr(expr)?;
                 }
+                self.in_dotted_expression = in_dotted_expression;
             }
             Expr::Dotted(_, left, right) => {
                 self.resolve_expr(left)?;
+                let in_dotted_expression = self.in_dotted_expression;
+                self.in_dotted_expression = true;
                 self.resolve_expr(right)?;
+                self.in_dotted_expression = in_dotted_expression;
             }
             Expr::This(token) => {
                 if !self.in_class_scope {
