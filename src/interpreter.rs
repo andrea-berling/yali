@@ -26,6 +26,7 @@ pub struct Environment {
     values: HashMap<String, Rc<RefCell<Value>>>,
     // TODO: just make it a value in the env
     this: Option<Rc<RefCell<Value>>>,
+    current_class: Option<Rc<RefCell<Value>>>,
 }
 
 impl Debug for Environment {
@@ -41,9 +42,13 @@ impl Debug for Environment {
     }
 }
 
+#[derive(Debug)]
 pub enum Callable {
     Class(Rc<RefCell<Value>>),
-    Method(Rc<RefCell<Value>>),
+    Method {
+        method: Rc<RefCell<Value>>,
+        class: Rc<RefCell<Value>>,
+    },
     Function(Rc<RefCell<Value>>),
 }
 
@@ -65,6 +70,7 @@ impl Environment {
                     body: Statement::Block(vec![]),
                     environment: Default::default(),
                     this: None,
+                    class: None,
                 }
                 .into(),
                 true,
@@ -264,6 +270,7 @@ impl<'a> Interpreter<'a> {
                         body: body.clone(),
                         environment: self.current_environment.clone(),
                         this: None,
+                        class: None,
                     }
                     .into(),
                     true,
@@ -294,6 +301,7 @@ impl<'a> Interpreter<'a> {
                                 body: body.clone(),
                                 environment: self.current_environment.clone(),
                                 this: None,
+                                class: None,
                             }
                             .into(),
                         );
@@ -326,7 +334,9 @@ impl<'a> Interpreter<'a> {
         token: &Token,
     ) -> Result<Rc<RefCell<Value>>, EvalError> {
         let callee = match callable {
-            Callable::Class(val) | Callable::Method(val) | Callable::Function(val)
+            Callable::Class(val)
+            | Callable::Method { method: val, .. }
+            | Callable::Function(val)
                 if matches!(&*val.borrow(), Value::Class { .. } | Value::Fn { .. }) =>
             {
                 val.clone()
@@ -339,6 +349,7 @@ impl<'a> Interpreter<'a> {
             body,
             environment,
             this: fn_this,
+            ..
         } = &*callee.borrow()
         else {
             if let Value::Class {
@@ -364,7 +375,10 @@ impl<'a> Interpreter<'a> {
                 if let Some(initializer) = methods.get("init") {
                     if matches!(&*initializer.borrow(), Value::Fn { .. }) {
                         self.call(
-                            &Callable::Method(initializer.clone()),
+                            &Callable::Method {
+                                method: initializer.clone(),
+                                class: callee.clone(),
+                            },
                             call_args,
                             Some(new_instance.clone()),
                             token,
@@ -387,7 +401,7 @@ impl<'a> Interpreter<'a> {
         };
 
         let old_environment = self.current_environment.clone();
-        if !matches!(callable, Callable::Method(_)) {
+        if !matches!(callable, Callable::Method { .. }) {
             self.set_environment(environment.clone());
         }
         let mut new_env = Environment::default();
@@ -401,12 +415,15 @@ impl<'a> Interpreter<'a> {
         ) {
             new_env.set(&var_token.lexeme, var_value.clone(), true);
         }
-        if matches!(callable, Callable::Method(_)) {
+
+        if let Callable::Method { class, .. } = callable {
             new_env.this = if let Some(this) = fn_this {
                 Some(this.clone())
             } else {
                 this
-            }
+            };
+
+            new_env.current_class = Some(class.clone());
         }
         self.add_environment(new_env);
 
@@ -426,7 +443,7 @@ impl<'a> Interpreter<'a> {
             };
         }
 
-        if matches!(callable, Callable::Method(_)) && callable_name == "init" {
+        if matches!(callable, Callable::Method { .. }) && callable_name == "init" {
             return_value = if let Some(this) = fn_this {
                 this.clone()
             } else {
@@ -453,7 +470,7 @@ impl<'a> Interpreter<'a> {
 
         self.pop_environment();
 
-        if !matches!(callable, Callable::Method(_)) {
+        if !matches!(callable, Callable::Method { .. }) {
             self.set_environment(old_environment);
         }
 
@@ -479,5 +496,16 @@ impl<'a> Interpreter<'a> {
             cur_env = tmp;
         }
         this
+    }
+
+    pub fn get_super(&self) -> Option<Rc<RefCell<Value>>> {
+        let mut cur_env = self.current_environment.clone();
+        let mut current_class = cur_env.borrow().current_class.clone();
+        while current_class.is_none() && cur_env.borrow().parent.is_some() {
+            let tmp = cur_env.borrow().parent.as_ref().unwrap().clone();
+            current_class = tmp.borrow().current_class.clone();
+            cur_env = tmp;
+        }
+        current_class.and_then(|class| class.borrow().get_superclass())
     }
 }

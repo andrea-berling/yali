@@ -22,6 +22,7 @@ pub enum Value {
         environment: Rc<RefCell<Environment>>,
         // TODO: just put it into the environment
         this: Option<Rc<RefCell<Value>>>,
+        class: Option<Rc<RefCell<Value>>>,
     },
     Class {
         name: String,
@@ -113,19 +114,16 @@ impl Value {
     }
 
     pub fn get_class(&self) -> Option<Rc<RefCell<Value>>> {
-        if let Value::ClassInstance { class, .. } = self {
-            Some(class.clone())
-        } else {
-            None
+        match self {
+            Value::ClassInstance { class, .. } => Some(class.clone()),
+            Value::Fn { class, .. } => class.clone(),
+            _ => None,
         }
     }
 
     pub fn get_superclass(&self) -> Option<Rc<RefCell<Value>>> {
-        if let Value::ClassInstance {
-            class: superclass, ..
-        } = self
-        {
-            Some(superclass.clone())
+        if let Value::Class { superclass, .. } = self {
+            superclass.clone()
         } else {
             None
         }
@@ -375,6 +373,7 @@ pub fn eval_expr(
                         todo!()
                     }
                     Expr::This(_) => todo!(),
+                    Expr::Super(token) => todo!(),
                 }
             }
             _ => todo!("Invalid assingee"),
@@ -424,6 +423,16 @@ pub fn eval_expr(
         Expr::This(token) => interpreter
             .get_this()
             .map_or(eval_error(token, InvalidReferenceToThis), Result::Ok),
+        Expr::Super(token) => {
+            let this = interpreter.get_this().unwrap();
+            let properties = this.borrow().get_properties().unwrap().clone();
+            let superclass = interpreter.get_super();
+            Ok(Value::ClassInstance {
+                class: superclass.clone().unwrap(),
+                properties: properties.clone(),
+            }
+            .into())
+        }
     }
 }
 
@@ -455,8 +464,14 @@ fn eval_expr_in_class_instance(
                                 match methods.get(&token.lexeme) {
                                     Some(method) => {
                                         let mut new_bound_function = method.borrow().clone();
-                                        if let Value::Fn { this, .. } = &mut new_bound_function {
+                                        if let Value::Fn {
+                                            this,
+                                            class: fn_class,
+                                            ..
+                                        } = &mut new_bound_function
+                                        {
                                             let _ = this.insert(class_instance.clone());
+                                            let _ = fn_class.insert(class.clone().unwrap());
                                         }
                                         return Ok(new_bound_function.into());
                                     }
@@ -477,6 +492,7 @@ fn eval_expr_in_class_instance(
             let callable = match callee.as_ref() {
                 Expr::Name(callee_token, _) => {
                     if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
+                        let mut method_class = class.clone();
                         let mut method = properties.get(&callee_token.lexeme).cloned();
                         if method.is_none() {
                             let mut class = Some(class.clone());
@@ -491,11 +507,17 @@ fn eval_expr_in_class_instance(
                                         Some(class_method) => {
                                             let mut new_bound_function =
                                                 class_method.borrow().clone();
-                                            if let Value::Fn { this, .. } = &mut new_bound_function
+                                            if let Value::Fn {
+                                                this,
+                                                class: fn_class,
+                                                ..
+                                            } = &mut new_bound_function
                                             {
                                                 let _ = this.insert(class_instance.clone());
+                                                let _ = fn_class.insert(class.clone().unwrap());
                                             }
                                             method = Some(new_bound_function.into());
+                                            method_class = class.clone().unwrap();
                                             break;
                                         }
                                         None => class = superclass.clone(),
@@ -506,7 +528,10 @@ fn eval_expr_in_class_instance(
                             }
                         }
                         match method {
-                            Some(method) => Callable::Method(method.clone()),
+                            Some(method) => Callable::Method {
+                                method: method.clone(),
+                                class: method_class,
+                            },
                             None => {
                                 return eval_error(callee_token, UndefinedMethod);
                             }
@@ -520,17 +545,25 @@ fn eval_expr_in_class_instance(
                     for expr in sub_args_exprs {
                         call_args.push((expr, eval_expr(expr, interpreter)?))
                     }
-                    let method = &Callable::Method(eval_expr_in_class_instance(
+                    let method = eval_expr_in_class_instance(
                         class_instance.clone(),
                         sub_callee,
                         interpreter,
-                    )?);
-                    Callable::Method(interpreter.call(
-                        method,
-                        &call_args,
-                        Some(class_instance.clone()),
-                        sub_token,
-                    )?)
+                    )?;
+                    let class = method.borrow().get_class().unwrap().clone();
+                    let method_callable = &Callable::Method {
+                        method: method.clone(),
+                        class: method.borrow().get_class().unwrap(),
+                    };
+                    Callable::Method {
+                        method: interpreter.call(
+                            method_callable,
+                            &call_args,
+                            Some(class_instance.clone()),
+                            sub_token,
+                        )?,
+                        class,
+                    }
                 }
                 _ => eval_error(token, CantCallThis)?,
             };
@@ -544,6 +577,7 @@ fn eval_expr_in_class_instance(
             todo!()
         }
         Expr::This(_) => todo!(),
+        Expr::Super(token) => todo!(),
     }
 }
 

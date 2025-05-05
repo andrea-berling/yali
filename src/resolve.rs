@@ -242,7 +242,7 @@ impl Resolver {
                 self.resolve_expr(right)?;
                 self.in_dotted_expression = in_dotted_expression;
             }
-            Expr::This(token) => {
+            Expr::This(token) | Expr::Super(token) => {
                 if !self.in_class_scope {
                     return resolving_error(token, UseOfThisOutsideOfClass);
                 }

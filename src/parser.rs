@@ -154,6 +154,7 @@ impl Parser {
                 "false" => Ok(Expr::Literal(LiteralExpr::False)),
                 "nil" => Ok(Expr::Literal(LiteralExpr::Nil)),
                 "this" => Ok(Expr::This(token.clone())),
+                "super" => Ok(Expr::Super(token.clone())),
                 _ => self.error(UnexpectedToken {
                     expected: "expression".to_string(),
                 }),
@@ -254,7 +255,8 @@ impl Parser {
 
     fn lhs(&mut self) -> Result<Expr, ParsingError> {
         if (next_token_matches!(self, TT::Identifier)
-            || next_token_matches!(self, TT::Keyword, "this"))
+            || next_token_matches!(self, TT::Keyword, "this")
+            || next_token_matches!(self, TT::Keyword, "super"))
             && second_next_token_matches!(self, TT::Dot | TT::LeftParen | TT::Equal)
         {
             let mut expr = self.call_or_ident(true, true)?;
@@ -608,6 +610,7 @@ pub enum Expr {
     Call(Box<Expr>, Token, Vec<Expr>),
     Dotted(Token, Box<Expr>, Box<Expr>),
     This(Token),
+    Super(Token),
 }
 
 #[derive(Debug, Clone)]
@@ -669,6 +672,7 @@ pub trait Visit {
             Expr::Call(_expr, _token, _vec) => todo!(),
             Expr::Dotted(_, _, _) => todo!(),
             Expr::This(_) => todo!(),
+            Expr::Super(token) => todo!(),
         }
     }
 
@@ -745,6 +749,7 @@ impl Visit for AstPrinter {
             Expr::Call(_expr, _token, _vec) => todo!(),
             Expr::Dotted(_, _, _) => todo!(),
             Expr::This(_) => todo!(),
+            Expr::Super(token) => todo!(),
         }
     }
 }
