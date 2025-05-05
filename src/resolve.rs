@@ -163,9 +163,12 @@ impl Resolver {
                     self.in_class_constructor = false;
                 }
             }
-            Declaration::Class(token, statement) => {
+            Declaration::Class(token, superclass, statement) => {
                 self.in_class_scope = true;
                 self.define(token);
+                if let Some(superclass) = superclass {
+                    self.resolve_expr(superclass)?;
+                }
                 let Statement::Block(body) = statement else {
                     todo!()
                 };

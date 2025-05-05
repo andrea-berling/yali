@@ -516,6 +516,16 @@ impl Parser {
     pub fn class_declaration(&mut self) -> Result<Declaration, ParsingError> {
         expect!(self, TT::Keyword, "class");
         let identifier_token = expect!(self, TT::Identifier).clone();
+        let mut super_class = None;
+        if next_token_matches!(self, TT::Less) {
+            expect!(self, TT::Less);
+            super_class = Some(self.primary()?);
+            if !matches!(super_class, Some(Expr::Name(_, _))) {
+                return self.error(UnexpectedToken {
+                    expected: "identifier".into(),
+                });
+            }
+        }
         expect!(self, TT::LeftBrace);
         let mut body = Vec::new();
         while !next_token_matches!(self, TT::RightBrace) {
@@ -523,7 +533,11 @@ impl Parser {
         }
         expect!(self, TT::RightBrace);
 
-        Ok(Declaration::Class(identifier_token, Statement::Block(body)))
+        Ok(Declaration::Class(
+            identifier_token,
+            super_class,
+            Statement::Block(body),
+        ))
     }
 
     pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
@@ -569,7 +583,7 @@ pub enum Declaration {
     Var(Token, Option<Expr>),
     Statement(Statement),
     Function(Token, Vec<Token>, Statement),
-    Class(Token, Statement),
+    Class(Token, Option<Expr>, Statement),
 }
 
 #[derive(Clone, Debug)]

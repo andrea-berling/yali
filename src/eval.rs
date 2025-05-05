@@ -20,11 +20,13 @@ pub enum Value {
         formal_args: Vec<Token>,
         body: Statement,
         environment: Rc<RefCell<Environment>>,
+        // TODO: just put it into the environment
         this: Option<Rc<RefCell<Value>>>,
     },
     Class {
         name: String,
         methods: HashMap<String, Rc<RefCell<Value>>>,
+        superclass: Option<Rc<RefCell<Value>>>,
     },
     ClassInstance {
         class: Rc<RefCell<Value>>,
@@ -53,10 +55,15 @@ impl Debug for Value {
                 .field("environment", environment)
                 .field("this", this)
                 .finish(),
-            Value::Class { name, methods } => f
+            Value::Class {
+                name,
+                methods,
+                superclass,
+            } => f
                 .debug_struct("Class")
                 .field("name", name)
                 .field("methods", &methods.keys())
+                .field("superclass", superclass)
                 .finish(),
             Value::ClassInstance { class, properties } => f
                 .debug_struct("ClassInstance")

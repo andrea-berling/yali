@@ -22,6 +22,7 @@ pub enum RuntimeError {
 pub struct Environment {
     parent: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Rc<RefCell<Value>>>,
+    // TODO: just make it a value in the env
     this: Option<Rc<RefCell<Value>>>,
 }
 
@@ -267,7 +268,12 @@ impl<'a> Interpreter<'a> {
                 );
                 Ok(())
             }
-            Declaration::Class(name, body) => {
+            Declaration::Class(name, superclass, body) => {
+                let superclass = if let Some(superclass) = superclass {
+                    Some(eval_expr(superclass, self)?.clone())
+                } else {
+                    None
+                };
                 let mut methods = HashMap::new();
                 let Statement::Block(body) = body else {
                     todo!();
@@ -291,6 +297,7 @@ impl<'a> Interpreter<'a> {
                     &name.lexeme,
                     Value::Class {
                         name: name.lexeme.clone(),
+                        superclass,
                         methods,
                     }
                     .into(),
