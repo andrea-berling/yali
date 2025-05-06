@@ -1,3 +1,4 @@
+// TODO: Class can't inherit from themselves (e.g. Foo > Foo) can be dealth with in the parser
 use crate::{
     lexer::Token,
     parser::{Declaration, Expr, Program, Statement},
@@ -15,8 +16,6 @@ pub enum ResolvingErrorType {
     InconsistentReference,
     #[error("Return statements are only allowed within function bodies")]
     InvalidReturn,
-    #[error("Undefined name")]
-    UndefinedName,
     #[error("Can't use 'this' outside of a class")]
     UseOfThisOutsideOfClass,
     #[error("Can't return a value from an initializer")]
@@ -31,15 +30,19 @@ use ResolvingErrorType::*;
 
 pub fn resolving_error<T>(token: &Token, error: ResolvingErrorType) -> Result<T, ResolvingError> {
     Err(ResolvingError {
-        token: token.clone(),
+        token: Some(token.clone()),
         error,
     })
 }
 
+pub fn precondition_error<T>(error: ResolvingErrorType) -> Result<T, ResolvingError> {
+    Err(ResolvingError { token: None, error })
+}
+
 #[derive(Error, Debug)]
-#[error("Error at {}: {error}.\n[line {}]",if !token.lexeme.is_empty() {format!("'{}'",&token.lexeme)} else {"end".to_string()}, token.line)]
+#[error("Error at {}: {error}.\n[line {}]",if token.is_none() {"the start".into()} else {let token = token.clone().unwrap(); if token.lexeme.is_empty() {"end".into()} else { format!("'{}'",&token.lexeme)}}, token.as_ref().map_or(0,|token| token.line))]
 pub struct ResolvingError {
-    token: Token,
+    token: Option<Token>,
     error: ResolvingErrorType,
 }
 
@@ -50,6 +53,7 @@ pub struct Resolver {
     scopes: VecDeque<Scope>,
     globals: Scope,
     in_function_scope: bool,
+    // TODO: just use a ClassType enum instead of all these variables
     in_class_scope: bool,
     in_subclass_scope: bool,
     in_class_constructor: bool,
@@ -80,15 +84,7 @@ impl Resolver {
 
     pub fn resolve(mut self, program: &Program) -> Result<HashMap<String, usize>, ResolvingError> {
         let Statement::Block(declarations) = program else {
-            return resolving_error(
-                &Token {
-                    token_type: todo!(),
-                    lexeme: todo!(),
-                    value: todo!(),
-                    line: todo!(),
-                },
-                InvalidProgram,
-            );
+            return precondition_error(InvalidProgram);
         };
         for declaration in declarations {
             self.resolve_declaration(declaration)?;

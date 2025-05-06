@@ -373,7 +373,7 @@ pub fn eval_expr(
                         todo!()
                     }
                     Expr::This(_) => todo!(),
-                    Expr::Super(token) => todo!(),
+                    Expr::Super(_) => todo!(),
                 }
             }
             _ => todo!("Invalid assingee"),
@@ -423,7 +423,7 @@ pub fn eval_expr(
         Expr::This(token) => interpreter
             .get_this()
             .map_or(eval_error(token, InvalidReferenceToThis), Result::Ok),
-        Expr::Super(token) => {
+        Expr::Super(_) => {
             let this = interpreter.get_this().unwrap();
             let properties = this.borrow().get_properties().unwrap().clone();
             let superclass = interpreter.get_super();
@@ -577,7 +577,7 @@ fn eval_expr_in_class_instance(
             todo!()
         }
         Expr::This(_) => todo!(),
-        Expr::Super(token) => todo!(),
+        Expr::Super(_) => todo!(),
     }
 }
 

@@ -10,6 +10,7 @@ use crate::{
     parser::{Declaration, Expr, Program, Statement},
 };
 
+// TODO: Add line numbers for RuntimeErrors
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error(transparent)]
@@ -277,6 +278,9 @@ impl<'a> Interpreter<'a> {
                 );
                 Ok(())
             }
+            // TODO: you can create a new environment in which to put the "super" definition here
+            // when evaluating the methods, that environment points to the current environment, and
+            // it's the environment of the function
             Declaration::Class(name, superclass, body) => {
                 let superclass = if let Some(superclass) = superclass {
                     let superclass = eval_expr(superclass, self)?.clone();

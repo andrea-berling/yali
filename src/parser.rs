@@ -154,6 +154,7 @@ impl Parser {
                 "false" => Ok(Expr::Literal(LiteralExpr::False)),
                 "nil" => Ok(Expr::Literal(LiteralExpr::Nil)),
                 "this" => Ok(Expr::This(token.clone())),
+                // TODO: you can parse the full super.<expr> expression as a dotted here
                 "super" => Ok(Expr::Super(token.clone())),
                 _ => self.error(UnexpectedToken {
                     expected: "expression".to_string(),
@@ -592,6 +593,7 @@ pub enum Declaration {
     Var(Token, Option<Expr>),
     Statement(Statement),
     Function(Token, Vec<Token>, Statement),
+    // TODO: The super class should probably be just a Expr::Name
     Class(Token, Option<Expr>, Statement),
 }
 
@@ -617,6 +619,7 @@ pub enum Expr {
     Call(Box<Expr>, Token, Vec<Expr>),
     Dotted(Token, Box<Expr>, Box<Expr>),
     This(Token),
+    // TODO: super should probably also include the name of the called method in its fields
     Super(Token),
 }
 
@@ -679,7 +682,7 @@ pub trait Visit {
             Expr::Call(_expr, _token, _vec) => todo!(),
             Expr::Dotted(_, _, _) => todo!(),
             Expr::This(_) => todo!(),
-            Expr::Super(token) => todo!(),
+            Expr::Super(_) => todo!(),
         }
     }
 
@@ -756,7 +759,7 @@ impl Visit for AstPrinter {
             Expr::Call(_expr, _token, _vec) => todo!(),
             Expr::Dotted(_, _, _) => todo!(),
             Expr::This(_) => todo!(),
-            Expr::Super(token) => todo!(),
+            Expr::Super(_) => todo!(),
         }
     }
 }
