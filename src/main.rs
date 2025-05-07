@@ -41,21 +41,26 @@ fn main() {
     match command.as_str() {
         "tokenize" => {
             for token in tokens {
-                println!("{}", token);
+                println!("{token}");
             }
         }
 
         cmd @ ("parse" | "evaluate" | "run") => {
             let mut parser = parser::Parser::new(&tokens);
             match cmd {
-                "parse" => match parser.parse_expr() {
-                    Ok(expr) => {
-                        println!("{expr}")
+                "parse" => match parser.parse_program() {
+                    Ok(program) => {
+                        println!("{program}")
                     }
-                    Err(parsing_error) => {
-                        eprintln!("{parsing_error}");
-                        exit_code = 65;
-                    }
+                    Err(_) => match parser.reset().parse_expr() {
+                        Ok(expr) => {
+                            println!("{expr}")
+                        }
+                        Err(parsing_error) => {
+                            eprintln!("{parsing_error}");
+                            exit_code = 65;
+                        }
+                    },
                 },
                 "evaluate" => match parser.parse_expr() {
                     Ok(expr) => match eval(&expr) {

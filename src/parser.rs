@@ -155,17 +155,86 @@ impl Display for Expr {
                 f.write_fmt(format_args!("{expr1}{}{expr2}", token.lexeme))
             }
             Expr::Call(callee, _, args) => {
-                f.write_fmt(format_args!("{}(", callee))?;
+                f.write_fmt(format_args!("({}) (", callee))?;
                 for (i, arg) in args.iter().enumerate() {
                     f.write_fmt(format_args!("{arg}"))?;
                     if i < args.len() - 1 {
-                        f.write_str(", ")?;
+                        f.write_str(" ")?;
                     }
                 }
                 f.write_str(")")
             }
-            Expr::Dotted(_, lhs, rhs) => f.write_fmt(format_args!("{}.{}", lhs, rhs)),
+            Expr::Dotted(_, lhs, rhs) => f.write_fmt(format_args!("({}).[{}]", lhs, rhs)),
             Expr::This(token) | Expr::Super(token) => f.write_fmt(format_args!("{}", token.lexeme)),
+        }
+    }
+}
+
+impl Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Statement::Expr(expr) => f.write_fmt(format_args!("{expr}")),
+            Statement::Print(expr) => f.write_fmt(format_args!("print {expr}")),
+            Statement::Block(declarations) => {
+                f.write_str("{")?;
+                for (i, decl) in declarations.iter().enumerate() {
+                    f.write_fmt(format_args!("{decl}"))?;
+                    if i < declarations.len() - 1 {
+                        f.write_str("; ")?;
+                    }
+                }
+                f.write_str("}")
+            }
+            Statement::If(condition, then_body, else_body) => {
+                f.write_fmt(format_args!("if {condition} {then_body}"))?;
+                if let Some(statement) = else_body {
+                    f.write_fmt(format_args!(" else {statement}"))?;
+                }
+                Ok(())
+            }
+            Statement::While(condition, body) => {
+                f.write_fmt(format_args!("while {condition} {body}"))
+            }
+            Statement::Return(_, expr) => {
+                f.write_str("return")?;
+                if let Some(expr) = expr {
+                    f.write_fmt(format_args!(" {expr}"))?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Display for Declaration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Declaration::Var(token, expr) => {
+                f.write_fmt(format_args!("var {}", token.lexeme))?;
+                if let Some(expr) = expr {
+                    f.write_fmt(format_args!(" = {expr}"))?;
+                }
+                Ok(())
+            }
+            Declaration::Statement(statement) => f.write_fmt(format_args!("{statement}")),
+            Declaration::Function(token, tokens, statement) => {
+                f.write_fmt(format_args!("fun {}(", token.lexeme))?;
+                for (i, arg) in tokens.iter().enumerate() {
+                    f.write_fmt(format_args!("{}", arg.lexeme))?;
+                    if i < tokens.len() - 1 {
+                        f.write_str(", ")?;
+                    }
+                }
+                f.write_str(")")?;
+                f.write_fmt(format_args!("{statement}"))
+            }
+            Declaration::Class(token, expr, statement) => {
+                f.write_fmt(format_args!("class {}", token.lexeme))?;
+                if let Some(expr) = expr {
+                    f.write_fmt(format_args!(" < {expr}"))?;
+                }
+                f.write_fmt(format_args!("{statement}"))
+            }
         }
     }
 }
@@ -662,16 +731,15 @@ impl Parser {
         }
     }
 
-    pub fn program(&mut self) -> ParsingResult<Program> {
+    pub fn parse_program(&mut self) -> ParsingResult<Program> {
         let mut declarations = Vec::new();
+        if next_token_matches!(self, TT::Eof) {
+            return self.error(NothingToParse);
+        }
         while !next_token_matches!(self, TT::Eof) {
             declarations.push(self.declaration()?);
         }
         Ok(Statement::Block(declarations))
-    }
-
-    pub fn parse_program(&mut self) -> ParsingResult<Program> {
-        self.program()
     }
 
     pub fn parse_expr(&mut self) -> ParsingResult<Expr> {
@@ -684,5 +752,13 @@ impl Parser {
             };
         }
         Ok(expr)
+    }
+
+    pub fn reset(&mut self) -> &mut Self {
+        self.position = 0;
+        self.current_token = self.tokens[0].clone();
+        self.current_address_prefix = "".to_string();
+        self.current_address_index = 0;
+        self
     }
 }
