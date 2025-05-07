@@ -1,13 +1,13 @@
 use std::env;
 use std::fs;
 
-mod eval;
+mod error;
 mod interpreter;
 mod lexer;
 mod parser;
 mod resolve;
 
-use eval::eval_ast;
+use interpreter::eval;
 use interpreter::Interpreter;
 use lexer::tokenize;
 use parser::{AstPrinter, Visit};
@@ -49,15 +49,18 @@ fn main() {
         cmd @ ("parse" | "evaluate" | "run") => {
             let mut parser = parser::Parser::new(&tokens);
             match cmd {
-                "parse" => match parser.parse_ast() {
-                    Ok(ast) => AstPrinter.visit_ast(ast),
+                "parse" => match parser.parse_expr() {
+                    Ok(expr) => {
+                        AstPrinter.visit_expr(expr);
+                        println!()
+                    }
                     Err(parsing_error) => {
                         eprintln!("{parsing_error}");
                         exit_code = 65;
                     }
                 },
-                "evaluate" => match parser.parse_ast() {
-                    Ok(ast) => match eval_ast(&ast) {
+                "evaluate" => match parser.parse_expr() {
+                    Ok(expr) => match eval(&expr) {
                         Ok(val) => println!("{val}"),
                         Err(err) => {
                             exit_code = 70;

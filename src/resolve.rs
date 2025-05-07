@@ -1,5 +1,6 @@
 // TODO: Class can't inherit from themselves (e.g. Foo > Foo) can be dealth with in the parser
 use crate::{
+    error::ErrorAtToken,
     lexer::Token,
     parser::{Declaration, Expr, Program, Statement},
 };
@@ -28,23 +29,8 @@ pub enum ResolvingErrorType {
 
 use ResolvingErrorType::*;
 
-pub fn resolving_error<T>(token: &Token, error: ResolvingErrorType) -> Result<T, ResolvingError> {
-    Err(ResolvingError {
-        token: Some(token.clone()),
-        error,
-    })
-}
-
-pub fn precondition_error<T>(error: ResolvingErrorType) -> Result<T, ResolvingError> {
-    Err(ResolvingError { token: None, error })
-}
-
-#[derive(Error, Debug)]
-#[error("Error at {}: {error}.\n[line {}]",if token.is_none() {"the start".into()} else {let token = token.clone().unwrap(); if token.lexeme.is_empty() {"end".into()} else { format!("'{}'",&token.lexeme)}}, token.as_ref().map_or(0,|token| token.line))]
-pub struct ResolvingError {
-    token: Option<Token>,
-    error: ResolvingErrorType,
-}
+type ResolvingError = ErrorAtToken<ResolvingErrorType>;
+type ResolutionResult = Result<(), ResolvingError>;
 
 type Scope = HashMap<String, bool>;
 
@@ -84,7 +70,7 @@ impl Resolver {
 
     pub fn resolve(mut self, program: &Program) -> Result<HashMap<String, usize>, ResolvingError> {
         let Statement::Block(declarations) = program else {
-            return precondition_error(InvalidProgram);
+            return Err(ResolvingError::new_without_token(InvalidProgram));
         };
         for declaration in declarations {
             self.resolve_declaration(declaration)?;
@@ -128,11 +114,11 @@ impl Resolver {
         }
     }
 
-    fn resolve_declaration(&mut self, declaration: &Declaration) -> Result<(), ResolvingError> {
+    fn resolve_declaration(&mut self, declaration: &Declaration) -> ResolutionResult {
         match declaration {
             Declaration::Var(token, expr) => {
                 if self.name_is_declared_in_current_scope(token) {
-                    return resolving_error(token, NameRebound);
+                    return Err(ResolvingError::new(token, NameRebound));
                 }
                 self.declare(token);
                 if let Some(expr) = expr {
@@ -145,7 +131,7 @@ impl Resolver {
             }
             Declaration::Function(token, args, statement) => {
                 if self.name_is_declared_in_current_scope(token) {
-                    return resolving_error(token, NameRebound);
+                    return Err(ResolvingError::new(token, NameRebound));
                 }
                 self.define(token);
                 if self.in_class_scope && token.lexeme == "init" {
@@ -160,7 +146,7 @@ impl Resolver {
                 let mut defined_args = HashSet::new();
                 for token in args {
                     if defined_args.contains(&token.lexeme) {
-                        return resolving_error(token, NameRebound);
+                        return Err(ResolvingError::new(token, NameRebound));
                     }
                     defined_args.insert(token.lexeme.clone());
                     self.define(token);
@@ -200,7 +186,7 @@ impl Resolver {
         Ok(())
     }
 
-    fn resolve_expr(&mut self, expr: &Expr) -> Result<(), ResolvingError> {
+    fn resolve_expr(&mut self, expr: &Expr) -> ResolutionResult {
         match expr {
             Expr::Literal(_) => {}
             Expr::Unary(_, expr) | Expr::Grouping(expr) => {
@@ -219,15 +205,15 @@ impl Resolver {
                             self.resolved_expressions.insert(address.clone(), depth);
                         }
                         Some((_, false)) => {
-                            return resolving_error(token, InconsistentReference);
+                            return Err(ResolvingError::new(token, InconsistentReference));
                         }
                         None => match self.globals.get(&token.lexeme) {
                             None => {
-                                //return resolving_error(token, UndefinedName); // TODO: Codecrafters
+                                //return Err(ResolvingError::new(token,UndefinedName)); // TODO: Codecrafters
                                 //test suite doesn't like errors here
                             }
                             Some(false) => {
-                                return resolving_error(token, InconsistentReference);
+                                return Err(ResolvingError::new(token, InconsistentReference));
                             }
                             _ => {}
                         },
@@ -252,22 +238,22 @@ impl Resolver {
             }
             Expr::This(token) => {
                 if !self.in_class_scope {
-                    return resolving_error(token, UseOfThisOutsideOfClass);
+                    return Err(ResolvingError::new(token, UseOfThisOutsideOfClass));
                 }
             }
             Expr::Super(token) => {
                 if !self.in_class_scope {
-                    return resolving_error(token, UseOfSuperOutsideOfClass);
+                    return Err(ResolvingError::new(token, UseOfSuperOutsideOfClass));
                 }
                 if !self.in_subclass_scope {
-                    return resolving_error(token, UseOfSuperOutsideOfSubclass);
+                    return Err(ResolvingError::new(token, UseOfSuperOutsideOfSubclass));
                 }
             }
         }
         Ok(())
     }
 
-    fn resolve_statement(&mut self, statement: &Statement) -> Result<(), ResolvingError> {
+    fn resolve_statement(&mut self, statement: &Statement) -> ResolutionResult {
         match statement {
             Statement::Expr(expr) | Statement::Print(expr) => {
                 self.resolve_expr(expr)?;
@@ -292,11 +278,11 @@ impl Resolver {
             }
             Statement::Return(t, expr) => {
                 if !self.in_function_scope {
-                    return resolving_error(t, InvalidReturn);
+                    return Err(ResolvingError::new(t, InvalidReturn));
                 }
                 if let Some(expr) = expr {
                     if self.in_class_constructor {
-                        return resolving_error(t, InvalidReturnInConstructor);
+                        return Err(ResolvingError::new(t, InvalidReturnInConstructor));
                     }
                     self.resolve_expr(expr)?;
                 }

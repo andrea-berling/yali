@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::lexer::{Literal, Token, TokenType as TT};
+use crate::{
+    error::ErrorAtToken,
+    lexer::{Literal, Token, TokenType as TT},
+};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -25,7 +28,7 @@ macro_rules! second_next_token_matches {
 macro_rules! define_binary_expression_parsers {
     ($($expr_type:ident = chain of $subexpr_type:ident joined by $operator_token_type:pat$(=$lexeme:literal)?),*) => {
         $(
-            fn $expr_type(&mut self) -> Result<Expr, ParsingError> {
+            fn $expr_type(&mut self) -> ParsingResult<Expr> {
                 let mut $expr_type = self.$subexpr_type()?;
 
                 while next_token_matches!(self,$operator_token_type $(,$lexeme)?)
@@ -65,7 +68,7 @@ macro_rules! expect {
                         $(if _lexeme == $lexeme)?
                     ) {
                         return Err(ParsingError::new(
-                            token.clone(),
+                            token,
                             UnexpectedToken{
                                 expected: format!("'{}'",expected_lexeme)
                             },
@@ -111,8 +114,8 @@ impl Parser {
         }
     }
 
-    fn error<T>(&self, error_type: ParsingErrorType) -> Result<T, ParsingError> {
-        Err(ParsingError::new(self.current_token.clone(), error_type))
+    fn error<T>(&self, error_type: ParsingErrorType) -> ParsingResult<T> {
+        Err(ParsingError::new(&self.current_token, error_type))
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -131,7 +134,7 @@ impl Parser {
         }
     }
 
-    fn primary(&mut self) -> Result<Expr, ParsingError> {
+    fn primary(&mut self) -> ParsingResult<Expr> {
         let Some(
             token @ Token {
                 token_type,
@@ -183,7 +186,7 @@ impl Parser {
         }
     }
 
-    fn arguments(&mut self) -> Result<Vec<Expr>, ParsingError> {
+    fn arguments(&mut self) -> ParsingResult<Vec<Expr>> {
         let mut arguments = vec![self.expr()?];
         while next_token_matches!(self, TT::Comma) {
             expect!(self, TT::Comma);
@@ -192,11 +195,7 @@ impl Parser {
         Ok(arguments)
     }
 
-    fn call_or_ident(
-        &mut self,
-        no_grouping: bool,
-        no_literals: bool,
-    ) -> Result<Expr, ParsingError> {
+    fn call_or_ident(&mut self, no_grouping: bool, no_literals: bool) -> ParsingResult<Expr> {
         let mut call_or_ident = self.primary()?;
         if let Expr::Literal(_) = call_or_ident {
             if no_literals {
@@ -229,7 +228,7 @@ impl Parser {
         Ok(call_or_ident)
     }
 
-    fn unary(&mut self) -> Result<Expr, ParsingError> {
+    fn unary(&mut self) -> ParsingResult<Expr> {
         if next_token_matches!(self, TT::Bang | TT::Minus) {
             let operator = self.advance().unwrap().clone();
             Ok(Expr::Unary(operator, Box::new(self.unary()?)))
@@ -261,7 +260,7 @@ impl Parser {
         factor = chain of unary joined by TT::Slash | TT::Star
     }
 
-    fn lhs(&mut self) -> Result<Expr, ParsingError> {
+    fn lhs(&mut self) -> ParsingResult<Expr> {
         if (next_token_matches!(self, TT::Identifier)
             || next_token_matches!(self, TT::Keyword, "this")
             || next_token_matches!(self, TT::Keyword, "super"))
@@ -285,7 +284,7 @@ impl Parser {
         }
     }
 
-    fn assignment(&mut self) -> Result<Expr, ParsingError> {
+    fn assignment(&mut self) -> ParsingResult<Expr> {
         let previous_position = self.position;
         match self.lhs() {
             Ok(lhs) => {
@@ -329,23 +328,11 @@ impl Parser {
         }
     }
 
-    fn expr(&mut self) -> Result<Expr, ParsingError> {
+    fn expr(&mut self) -> ParsingResult<Expr> {
         self.assignment()
     }
 
-    fn ast(&mut self) -> Result<Ast, ParsingError> {
-        let expr = self.expr()?;
-        if !next_token_matches!(self, TT::Eof) {
-            return if self.peek().is_some() {
-                self.error(UnparsedTokens)
-            } else {
-                self.error(ParsedTooMuch)
-            };
-        }
-        Ok(Ast::Expr(expr))
-    }
-
-    pub fn statement(&mut self) -> Result<Statement, ParsingError> {
+    pub fn statement(&mut self) -> ParsingResult<Statement> {
         let Some(Token {
             token_type, lexeme, ..
         }) = self.peek().cloned()
@@ -466,7 +453,7 @@ impl Parser {
         return_value
     }
 
-    pub fn var_declaration(&mut self) -> Result<Declaration, ParsingError> {
+    pub fn var_declaration(&mut self) -> ParsingResult<Declaration> {
         expect!(self, TT::Keyword, "var");
         let Some(
             identifier_token @ Token {
@@ -494,10 +481,7 @@ impl Parser {
         Ok(Declaration::Var(identifier_token, expression))
     }
 
-    pub fn fun_or_method_declaration(
-        &mut self,
-        is_method: bool,
-    ) -> Result<Declaration, ParsingError> {
+    pub fn fun_or_method_declaration(&mut self, is_method: bool) -> ParsingResult<Declaration> {
         if !is_method {
             expect!(self, TT::Keyword, "fun");
         }
@@ -523,14 +507,18 @@ impl Parser {
         Ok(Declaration::Function(identifier_token, arguments, body))
     }
 
-    pub fn class_declaration(&mut self) -> Result<Declaration, ParsingError> {
+    pub fn class_declaration(&mut self) -> ParsingResult<Declaration> {
         expect!(self, TT::Keyword, "class");
-        let identifier_token = expect!(self, TT::Identifier).clone();
+        let class_identifier_token = expect!(self, TT::Identifier).clone();
         let mut super_class = None;
         if next_token_matches!(self, TT::Less) {
             expect!(self, TT::Less);
             super_class = Some(self.primary()?);
-            if !matches!(super_class, Some(Expr::Name(_, _))) {
+            if let Some(Expr::Name(superclass_identifier_token, _)) = super_class.as_ref() {
+                if superclass_identifier_token.lexeme == class_identifier_token.lexeme {
+                    return self.error(CantInheritFromSelf);
+                }
+            } else {
                 return self.error(UnexpectedToken {
                     expected: "identifier".into(),
                 });
@@ -544,13 +532,13 @@ impl Parser {
         expect!(self, TT::RightBrace);
 
         Ok(Declaration::Class(
-            identifier_token,
+            class_identifier_token,
             super_class,
             Statement::Block(body),
         ))
     }
 
-    pub fn declaration(&mut self) -> Result<Declaration, ParsingError> {
+    pub fn declaration(&mut self) -> ParsingResult<Declaration> {
         if next_token_matches!(self, TT::Keyword, "var") {
             Ok(self.var_declaration()?)
         } else if next_token_matches!(self, TT::Keyword, "fun") {
@@ -564,7 +552,7 @@ impl Parser {
         }
     }
 
-    pub fn program(&mut self) -> Result<Program, ParsingError> {
+    pub fn program(&mut self) -> ParsingResult<Program> {
         let mut declarations = Vec::new();
         while !next_token_matches!(self, TT::Eof) {
             declarations.push(self.declaration()?);
@@ -572,18 +560,21 @@ impl Parser {
         Ok(Statement::Block(declarations))
     }
 
-    pub fn parse_program(&mut self) -> Result<Program, ParsingError> {
+    pub fn parse_program(&mut self) -> ParsingResult<Program> {
         self.program()
     }
 
-    pub fn parse_ast(&mut self) -> Result<Ast, ParsingError> {
-        self.ast()
+    pub fn parse_expr(&mut self) -> ParsingResult<Expr> {
+        let expr = self.expr()?;
+        if !next_token_matches!(self, TT::Eof) {
+            return if self.peek().is_some() {
+                self.error(UnparsedTokens)
+            } else {
+                self.error(ParsedTooMuch)
+            };
+        }
+        Ok(expr)
     }
-}
-
-#[derive(Debug)]
-pub enum Ast {
-    Expr(Expr),
 }
 
 pub type Program = Statement;
@@ -643,30 +634,16 @@ pub enum ParsingErrorType {
     UnexpectedToken { expected: String },
     #[error("Invalid epxression on the left side of '='")]
     InvalidLhs(Option<Expr>),
+    #[error("A class can't inherit from itself")]
+    CantInheritFromSelf,
 }
 
 use ParsingErrorType::*;
 
-#[derive(Error, Debug)]
-#[error("[line {}] Error at {}: {error}.",token.line,if !token.lexeme.is_empty() {format!("'{}'",&token.lexeme)} else {"end".to_string()})]
-pub struct ParsingError {
-    token: Token,
-    error: ParsingErrorType,
-}
-
-impl ParsingError {
-    pub fn new(token: Token, error: ParsingErrorType) -> Self {
-        Self { token, error }
-    }
-}
+type ParsingError = ErrorAtToken<ParsingErrorType>;
+type ParsingResult<T> = Result<T, ParsingError>;
 
 pub trait Visit {
-    fn visit_ast(&self, ast: Ast) {
-        match ast {
-            Ast::Expr(expr) => self.visit_expr(expr),
-        }
-    }
-
     fn visit_expr(&self, expr: Expr) {
         match expr {
             Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
@@ -718,13 +695,6 @@ impl Visit for AstPrinter {
         print!("(group ");
         self.visit_expr(expr);
         print!(")")
-    }
-
-    fn visit_ast(&self, ast: Ast) {
-        match ast {
-            Ast::Expr(expr) => self.visit_expr(expr),
-        }
-        println!();
     }
 
     fn visit_expr(&self, expr: Expr) {
