@@ -760,10 +760,9 @@ impl<'a> Interpreter<'a> {
                 let class_instance = self.eval_expr(head)?;
                 Ok(self.eval_expr_in_class_instance(class_instance, tail)?)
             }
-            Expr::This(token) => self.get_this().map_or(
-                Err(EvalError::new(token, InvalidReferenceToThis)),
-                Result::Ok,
-            ),
+            Expr::This(token) => self
+                .get_this()
+                .ok_or(EvalError::new(token, InvalidReferenceToThis)),
             Expr::Super(_) => {
                 let this = self.get_this().unwrap();
                 let properties = this.borrow().get_properties().unwrap().clone();

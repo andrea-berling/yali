@@ -24,6 +24,8 @@ pub enum ResolvingErrorType {
     UseOfSuperOutsideOfClass,
     #[error("Can't use 'super' in a class with no superclass")]
     UseOfSuperOutsideOfSubclass,
+    #[error("Expected a block for the body")]
+    ExpectedBody,
 }
 
 use ResolvingErrorType::*;
@@ -33,32 +35,32 @@ type ResolutionResult = Result<(), ResolvingError>;
 
 type Scope = HashMap<String, bool>;
 
+#[derive(Default, Clone, Copy)]
+enum ContextType {
+    #[default]
+    None,
+    Function,
+    Method,
+    Class,
+    Constructor,
+}
+
+#[derive(Default, Clone, Copy)]
+struct Context {
+    context_type: ContextType,
+    in_subclass: bool,
+    in_dotted_expression: bool,
+}
+
+#[derive(Default)]
 pub struct Resolver {
     resolved_expressions: HashMap<String, usize>,
     scopes: VecDeque<Scope>,
     globals: Scope,
-    in_function_scope: bool,
-    // TODO: just use a ClassType enum instead of all these variables
-    in_class_scope: bool,
-    in_subclass_scope: bool,
-    in_class_constructor: bool,
-    in_dotted_expression: bool,
+    context: Context,
 }
 
 impl Resolver {
-    pub fn new() -> Self {
-        Self {
-            resolved_expressions: HashMap::new(),
-            scopes: VecDeque::new(),
-            in_function_scope: false,
-            in_class_scope: false,
-            in_class_constructor: false,
-            globals: HashMap::new(),
-            in_dotted_expression: false,
-            in_subclass_scope: false,
-        }
-    }
-
     fn add_scope(&mut self) {
         self.scopes.push_front(HashMap::new());
     }
@@ -132,16 +134,24 @@ impl Resolver {
                 if self.name_is_declared_in_current_scope(token) {
                     return Err(ResolvingError::new(token, NameRebound));
                 }
+                let previous_context = self.context;
+                self.context.context_type = match self.context.context_type {
+                    ContextType::None | ContextType::Function => ContextType::Function,
+                    ContextType::Class => {
+                        if token.lexeme == "init" {
+                            ContextType::Constructor
+                        } else {
+                            ContextType::Method
+                        }
+                    }
+                    ContextType::Constructor => ContextType::Method,
+                    _ => self.context.context_type,
+                };
                 self.define(token);
-                if self.in_class_scope && token.lexeme == "init" {
-                    self.in_class_constructor = true;
-                }
                 let Statement::Block(body) = statement else {
-                    todo!()
+                    return Err(ResolvingError::new(token, ExpectedBody));
                 };
                 self.add_scope();
-                let old_in_function_scope = self.in_function_scope;
-                self.in_function_scope = true;
                 let mut defined_args = HashSet::new();
                 for token in args {
                     if defined_args.contains(&token.lexeme) {
@@ -154,31 +164,24 @@ impl Resolver {
                     self.resolve_declaration(declaration)?;
                 }
                 self.pop_scope();
-                self.in_function_scope = old_in_function_scope;
+                self.context = previous_context;
                 self.define(token);
-                if token.lexeme == "init" && self.in_class_constructor {
-                    self.in_class_constructor = false;
-                }
             }
             Declaration::Class(token, superclass, statement) => {
-                self.in_class_scope = true;
-                superclass
-                    .as_ref()
-                    .inspect(|_| self.in_subclass_scope = true);
+                let previous_context = self.context;
+                self.context.context_type = ContextType::Class;
                 if let Some(superclass) = superclass {
                     self.resolve_expr(superclass)?;
+                    self.context.in_subclass = true;
                 }
                 self.define(token);
                 let Statement::Block(body) = statement else {
-                    todo!()
+                    return Err(ResolvingError::new(token, ExpectedBody));
                 };
                 for declaration in body {
                     self.resolve_declaration(declaration)?
                 }
-                self.in_class_scope = false;
-                superclass
-                    .as_ref()
-                    .inspect(|_| self.in_subclass_scope = false);
+                self.context = previous_context;
             }
         }
         Ok(())
@@ -197,53 +200,48 @@ impl Resolver {
                 self.resolve_expr(expr2)?;
             }
             Expr::Name(token, address) => {
-                if !self.in_dotted_expression {
-                    match self.resolve_name(token) {
-                        Some((depth, true)) => {
+                if !self.context.in_dotted_expression {
+                    if let Some((depth, defined)) = self.resolve_name(token) {
+                        if defined {
                             self.resolved_expressions.insert(address.clone(), depth);
-                        }
-                        Some((_, false)) => {
+                        } else {
                             return Err(ResolvingError::new(token, InconsistentReference));
                         }
-                        None => match self.globals.get(&token.lexeme) {
-                            None => {
-                                //return Err(ResolvingError::new(token,UndefinedName)); // TODO: Codecrafters
-                                //test suite doesn't like errors here
-                            }
-                            Some(false) => {
-                                return Err(ResolvingError::new(token, InconsistentReference));
-                            }
-                            _ => {}
-                        },
                     }
                 }
             }
             Expr::Call(expr, _, exprs) => {
                 self.resolve_expr(expr)?;
-                let in_dotted_expression = self.in_dotted_expression;
-                self.in_dotted_expression = false;
+                let in_dotted_expression = self.context.in_dotted_expression;
+                self.context.in_dotted_expression = false;
                 for expr in exprs {
                     self.resolve_expr(expr)?;
                 }
-                self.in_dotted_expression = in_dotted_expression;
+                self.context.in_dotted_expression = in_dotted_expression;
             }
             Expr::Dotted(_, left, right) => {
                 self.resolve_expr(left)?;
-                let in_dotted_expression = self.in_dotted_expression;
-                self.in_dotted_expression = true;
+                let in_dotted_expression = self.context.in_dotted_expression;
+                self.context.in_dotted_expression = true;
                 self.resolve_expr(right)?;
-                self.in_dotted_expression = in_dotted_expression;
+                self.context.in_dotted_expression = in_dotted_expression;
             }
             Expr::This(token) => {
-                if !self.in_class_scope {
+                if !matches!(
+                    self.context.context_type,
+                    ContextType::Method | ContextType::Constructor,
+                ) {
                     return Err(ResolvingError::new(token, UseOfThisOutsideOfClass));
                 }
             }
             Expr::Super(token) => {
-                if !self.in_class_scope {
+                if !matches!(
+                    self.context.context_type,
+                    ContextType::Method | ContextType::Constructor,
+                ) {
                     return Err(ResolvingError::new(token, UseOfSuperOutsideOfClass));
                 }
-                if !self.in_subclass_scope {
+                if !self.context.in_subclass {
                     return Err(ResolvingError::new(token, UseOfSuperOutsideOfSubclass));
                 }
             }
@@ -275,11 +273,14 @@ impl Resolver {
                 self.resolve_statement(body)?;
             }
             Statement::Return(t, expr) => {
-                if !self.in_function_scope {
+                if !matches!(
+                    self.context.context_type,
+                    ContextType::Method | ContextType::Function | ContextType::Constructor
+                ) {
                     return Err(ResolvingError::new(t, InvalidReturn));
                 }
                 if let Some(expr) = expr {
-                    if self.in_class_constructor {
+                    if matches!(self.context.context_type, ContextType::Constructor) {
                         return Err(ResolvingError::new(t, InvalidReturnInConstructor));
                     }
                     self.resolve_expr(expr)?;
