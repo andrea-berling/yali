@@ -1,4 +1,3 @@
-// TODO: Class can't inherit from themselves (e.g. Foo > Foo) can be dealth with in the parser
 use crate::{
     error::ErrorAtToken,
     lexer::Token,
@@ -166,7 +165,6 @@ impl Resolver {
                 superclass
                     .as_ref()
                     .inspect(|_| self.in_subclass_scope = true);
-                self.declare(token);
                 if let Some(superclass) = superclass {
                     self.resolve_expr(superclass)?;
                 }
