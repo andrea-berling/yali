@@ -1,4 +1,5 @@
 use std::iter::zip;
+use std::vec;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use std::fmt::{Debug, Display, Formatter};
@@ -254,6 +255,8 @@ impl Debug for Environment {
                 &self.parent.as_ref().map(|this| this.as_ptr()),
             )
             .field("parent", &self.parent)
+            .field("this", &self.this)
+            .field("current_class", &self.current_class)
             .finish()
     }
 }
@@ -504,36 +507,34 @@ impl<'a> Interpreter<'a> {
                 } else {
                     None
                 };
-                let mut methods = HashMap::new();
                 let Statement::Block(body) = body else {
                     todo!();
                 };
+                let new_class: Rc<RefCell<Value>> = Value::Class {
+                    name: name.lexeme.clone(),
+                    superclass,
+                    methods: HashMap::new(),
+                }
+                .into();
                 for declaration in body {
                     if let Declaration::Function(name, args, body) = declaration {
-                        methods.insert(
-                            name.lexeme.clone(),
-                            Value::Fn {
-                                name: name.lexeme.clone(),
-                                formal_args: args.clone(),
-                                body: body.clone(),
-                                environment: self.current_environment.clone(),
-                                this: None,
-                                class: None,
-                            }
-                            .into(),
-                        );
+                        if let Value::Class { methods, .. } = &mut *new_class.borrow_mut() {
+                            methods.insert(
+                                name.lexeme.clone(),
+                                Value::Fn {
+                                    name: name.lexeme.clone(),
+                                    formal_args: args.clone(),
+                                    body: body.clone(),
+                                    environment: self.current_environment.clone(),
+                                    this: None,
+                                    class: Some(new_class.clone()),
+                                }
+                                .into(),
+                            );
+                        }
                     }
                 }
-                self.set_var(
-                    &name.lexeme,
-                    Value::Class {
-                        name: name.lexeme.clone(),
-                        superclass,
-                        methods,
-                    }
-                    .into(),
-                    true,
-                );
+                self.set_var(&name.lexeme, new_class, true);
                 Ok(())
             }
         }
@@ -720,7 +721,7 @@ impl<'a> Interpreter<'a> {
                             todo!()
                         }
                         Expr::This(_) => todo!(),
-                        Expr::Super(_) => todo!(),
+                        Expr::Super(_, _) => todo!(),
                     }
                 }
                 _ => todo!("Invalid assingee"),
@@ -747,6 +748,15 @@ impl<'a> Interpreter<'a> {
                     Value::Fn { name, .. } | Value::Class { name, .. } if is_primitive(name) => {
                         eval_primitive_function(name, token)
                     }
+                    Value::Fn { this, class, .. } if class.is_some() => self.call(
+                        &Callable::Method {
+                            method: callable,
+                            class: class.as_ref().unwrap().clone(),
+                        },
+                        &call_args,
+                        this.clone(),
+                        token,
+                    ),
                     Value::Fn { .. } => {
                         self.call(&Callable::Function(callable), &call_args, None, token)
                     }
@@ -763,16 +773,15 @@ impl<'a> Interpreter<'a> {
             Expr::This(token) => self
                 .get_this()
                 .ok_or(EvalError::new(token, InvalidReferenceToThis)),
-            Expr::Super(_) => {
-                let this = self.get_this().unwrap();
-                let properties = this.borrow().get_properties().unwrap().clone();
-                let superclass = self.get_super();
-                Ok(Value::ClassInstance {
-                    class: superclass.clone().unwrap(),
-                    properties: properties.clone(),
-                }
-                .into())
-            }
+            Expr::Super(_, method) => self
+                .get_super()
+                .unwrap()
+                .borrow()
+                .get_methods()
+                .unwrap()
+                .get(&method.lexeme)
+                .cloned()
+                .ok_or(EvalError::new(method, UndefinedMethod)),
         }
     }
 
@@ -916,7 +925,7 @@ impl<'a> Interpreter<'a> {
                 todo!()
             }
             Expr::This(_) => todo!(),
-            Expr::Super(_) => todo!(),
+            Expr::Super(_, _) => todo!(),
         }
     }
 

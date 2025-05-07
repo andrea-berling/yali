@@ -234,7 +234,7 @@ impl Resolver {
                     return Err(ResolvingError::new(token, UseOfThisOutsideOfClass));
                 }
             }
-            Expr::Super(token) => {
+            Expr::Super(token, _) => {
                 if !matches!(
                     self.context.context_type,
                     ContextType::Method | ContextType::Constructor,

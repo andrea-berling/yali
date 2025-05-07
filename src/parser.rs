@@ -89,7 +89,6 @@ pub enum Declaration {
     Var(Token, Option<Expr>),
     Statement(Statement),
     Function(Token, Vec<Token>, Statement),
-    // TODO: The super class should probably be just a Expr::Name
     Class(Token, Option<Expr>, Statement),
 }
 
@@ -116,7 +115,7 @@ pub enum Expr {
     Dotted(Token, Box<Expr>, Box<Expr>),
     This(Token),
     // TODO: super should probably also include the name of the called method in its fields
-    Super(Token),
+    Super(Token, Token),
 }
 
 #[derive(Debug, Clone)]
@@ -165,7 +164,10 @@ impl Display for Expr {
                 f.write_str(")")
             }
             Expr::Dotted(_, lhs, rhs) => f.write_fmt(format_args!("({}).[{}]", lhs, rhs)),
-            Expr::This(token) | Expr::Super(token) => f.write_fmt(format_args!("{}", token.lexeme)),
+            Expr::This(token) => f.write_fmt(format_args!("{}", token.lexeme)),
+            Expr::Super(super_token, method) => {
+                f.write_fmt(format_args!("{}.{}", super_token.lexeme, method.lexeme))
+            }
         }
     }
 }
@@ -337,7 +339,10 @@ impl Parser {
                 "nil" => Ok(Expr::Literal(LiteralExpr::Nil)),
                 "this" => Ok(Expr::This(token.clone())),
                 // TODO: you can parse the full super.<expr> expression as a dotted here
-                "super" => Ok(Expr::Super(token.clone())),
+                "super" => Ok(Expr::Super(token.clone(), {
+                    expect!(self, TT::Dot);
+                    expect!(self, TT::Identifier).clone()
+                })),
                 _ => self.error(UnexpectedToken {
                     expected: "expression".to_string(),
                 }),
@@ -380,13 +385,6 @@ impl Parser {
             if no_literals {
                 return self.error(UnexpectedToken {
                     expected: "any expression other than a literal".into(),
-                });
-            }
-        }
-        if let Expr::Super(_) = call_or_ident {
-            if !next_token_matches!(self, TT::Dot) {
-                return self.error(UnexpectedToken {
-                    expected: ".".into(),
                 });
             }
         }
