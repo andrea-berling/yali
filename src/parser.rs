@@ -1,17 +1,11 @@
+use std::fmt::Display;
+
 use thiserror::Error;
 
 use crate::{
     error::ErrorAtToken,
     lexer::{Literal, Token, TokenType as TT},
 };
-
-pub struct Parser {
-    tokens: Vec<Token>,
-    position: usize,
-    current_token: Token,
-    current_address_prefix: String,
-    current_address_index: usize,
-}
 
 macro_rules! next_token_matches {
     ($self: ident, $token_type:pat$(,$lexeme:literal)?) => {
@@ -80,6 +74,122 @@ macro_rules! expect {
         }
     };
 }
+
+pub struct Parser {
+    tokens: Vec<Token>,
+    position: usize,
+    current_token: Token,
+    current_address_prefix: String,
+    current_address_index: usize,
+}
+pub type Program = Statement;
+
+#[derive(Clone, Debug)]
+pub enum Declaration {
+    Var(Token, Option<Expr>),
+    Statement(Statement),
+    Function(Token, Vec<Token>, Statement),
+    // TODO: The super class should probably be just a Expr::Name
+    Class(Token, Option<Expr>, Statement),
+}
+
+#[derive(Clone, Debug)]
+pub enum Statement {
+    Expr(Expr),
+    Print(Expr),
+    Block(Vec<Declaration>),
+    If(Expr, Box<Statement>, Option<Box<Statement>>),
+    While(Expr, Box<Statement>),
+    Return(Token, Option<Expr>),
+}
+
+#[derive(Clone, Debug)]
+pub enum Expr {
+    Literal(LiteralExpr),
+    Name(Token, String),
+    Unary(Token, Box<Expr>),
+    Binary(Box<Expr>, Token, Box<Expr>),
+    Grouping(Box<Expr>),
+    Assign(Box<Expr>, Box<Expr>),
+    Logical(Box<Expr>, Token, Box<Expr>),
+    Call(Box<Expr>, Token, Vec<Expr>),
+    Dotted(Token, Box<Expr>, Box<Expr>),
+    This(Token),
+    // TODO: super should probably also include the name of the called method in its fields
+    Super(Token),
+}
+
+#[derive(Debug, Clone)]
+pub enum LiteralExpr {
+    Lit(Literal),
+    True,
+    False,
+    Nil,
+}
+
+impl Display for LiteralExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LiteralExpr::Lit(literal) => f.write_fmt(format_args!("{literal}")),
+            LiteralExpr::True => f.write_str("true"),
+            LiteralExpr::False => f.write_str("false"),
+            LiteralExpr::Nil => f.write_str("nil"),
+        }
+    }
+}
+
+impl Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expr::Literal(literal_expr) => f.write_fmt(format_args!("{literal_expr}")),
+            Expr::Unary(operator, unary) => {
+                f.write_fmt(format_args!("({} {unary})", operator.lexeme))
+            }
+            Expr::Binary(expr1, operator, expr2) => {
+                f.write_fmt(format_args!("({} {expr1} {expr2})", operator.lexeme))
+            }
+            Expr::Grouping(expr) => f.write_fmt(format_args!("(group {expr})")),
+            Expr::Name(token, _) => f.write_fmt(format_args!("{}", token.lexeme)),
+            Expr::Assign(assignee, expr) => f.write_fmt(format_args!("{assignee} = {expr}")),
+            Expr::Logical(expr1, token, expr2) => {
+                f.write_fmt(format_args!("{expr1}{}{expr2}", token.lexeme))
+            }
+            Expr::Call(callee, _, args) => {
+                f.write_fmt(format_args!("{}(", callee))?;
+                for (i, arg) in args.iter().enumerate() {
+                    f.write_fmt(format_args!("{arg}"))?;
+                    if i < args.len() - 1 {
+                        f.write_str(", ")?;
+                    }
+                }
+                f.write_str(")")
+            }
+            Expr::Dotted(_, lhs, rhs) => f.write_fmt(format_args!("{}.{}", lhs, rhs)),
+            Expr::This(token) | Expr::Super(token) => f.write_fmt(format_args!("{}", token.lexeme)),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ParsingErrorType {
+    #[error("Unparsed tokens")]
+    UnparsedTokens,
+    #[error("Parsed over the EOF token")]
+    ParsedTooMuch,
+    #[error("Nothing to parse")]
+    NothingToParse,
+    #[error("Expected {expected}")]
+    UnexpectedToken { expected: String },
+    #[error("Invalid epxression on the left side of '='")]
+    InvalidLhs(Option<Expr>),
+    #[error("A class can't inherit from itself")]
+    CantInheritFromSelf,
+}
+
+use ParsingErrorType::*;
+
+type ParsingError = ErrorAtToken<ParsingErrorType>;
+type ParsingResult<T> = Result<T, ParsingError>;
 
 impl Parser {
     pub fn new(tokens: &[Token]) -> Self {
@@ -574,162 +684,5 @@ impl Parser {
             };
         }
         Ok(expr)
-    }
-}
-
-pub type Program = Statement;
-
-#[derive(Clone, Debug)]
-pub enum Declaration {
-    Var(Token, Option<Expr>),
-    Statement(Statement),
-    Function(Token, Vec<Token>, Statement),
-    // TODO: The super class should probably be just a Expr::Name
-    Class(Token, Option<Expr>, Statement),
-}
-
-#[derive(Clone, Debug)]
-pub enum Statement {
-    Expr(Expr),
-    Print(Expr),
-    Block(Vec<Declaration>),
-    If(Expr, Box<Statement>, Option<Box<Statement>>),
-    While(Expr, Box<Statement>),
-    Return(Token, Option<Expr>),
-}
-
-#[derive(Clone, Debug)]
-pub enum Expr {
-    Literal(LiteralExpr),
-    Name(Token, String),
-    Unary(Token, Box<Expr>),
-    Binary(Box<Expr>, Token, Box<Expr>),
-    Grouping(Box<Expr>),
-    Assign(Box<Expr>, Box<Expr>),
-    Logical(Box<Expr>, Token, Box<Expr>),
-    Call(Box<Expr>, Token, Vec<Expr>),
-    Dotted(Token, Box<Expr>, Box<Expr>),
-    This(Token),
-    // TODO: super should probably also include the name of the called method in its fields
-    Super(Token),
-}
-
-#[derive(Debug, Clone)]
-pub enum LiteralExpr {
-    Lit(Literal),
-    True,
-    False,
-    Nil,
-}
-
-#[derive(Error, Debug)]
-pub enum ParsingErrorType {
-    #[error("Unparsed tokens")]
-    UnparsedTokens,
-    #[error("Parsed over the EOF token")]
-    ParsedTooMuch,
-    #[error("Nothing to parse")]
-    NothingToParse,
-    #[error("Expected {expected}")]
-    UnexpectedToken { expected: String },
-    #[error("Invalid epxression on the left side of '='")]
-    InvalidLhs(Option<Expr>),
-    #[error("A class can't inherit from itself")]
-    CantInheritFromSelf,
-}
-
-use ParsingErrorType::*;
-
-type ParsingError = ErrorAtToken<ParsingErrorType>;
-type ParsingResult<T> = Result<T, ParsingError>;
-
-pub trait Visit {
-    fn visit_expr(&self, expr: Expr) {
-        match expr {
-            Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
-            Expr::Unary(_, unary) => self.visit_expr(*unary),
-            Expr::Binary(expr, _, expr1) => {
-                self.visit_expr(*expr);
-                self.visit_expr(*expr1);
-            }
-            Expr::Grouping(expr) => self.visit_grouping(*expr),
-            Expr::Name(_, _) => todo!(),
-            Expr::Assign(_token, _expr) => todo!(),
-            Expr::Logical(_expr, _token, _expr1) => todo!(),
-            Expr::Call(_expr, _token, _vec) => todo!(),
-            Expr::Dotted(_, _, _) => todo!(),
-            Expr::This(_) => todo!(),
-            Expr::Super(_) => todo!(),
-        }
-    }
-
-    fn visit_expr_literal(&self, literal_expr: LiteralExpr) {
-        if let LiteralExpr::Lit(literal) = literal_expr {
-            self.visit_literal(literal);
-        }
-    }
-
-    fn visit_literal(&self, _: Literal) {}
-
-    fn visit_grouping(&self, expr: Expr) {
-        self.visit_expr(expr);
-    }
-}
-
-pub struct AstPrinter;
-
-impl Visit for AstPrinter {
-    fn visit_expr_literal(&self, literal_expr: LiteralExpr) {
-        print!(
-            "{}",
-            match literal_expr {
-                LiteralExpr::Lit(literal) => format!("{literal}"),
-                LiteralExpr::True => "true".to_string(),
-                LiteralExpr::False => "false".to_string(),
-                LiteralExpr::Nil => "nil".to_string(),
-            }
-        )
-    }
-
-    fn visit_grouping(&self, expr: Expr) {
-        print!("(group ");
-        self.visit_expr(expr);
-        print!(")")
-    }
-
-    fn visit_expr(&self, expr: Expr) {
-        match expr {
-            Expr::Literal(literal_expr) => self.visit_expr_literal(literal_expr),
-            Expr::Unary(operator, expr) => {
-                print!("({} ", operator.lexeme);
-                self.visit_expr(*expr);
-                print!(")");
-            }
-            Expr::Binary(expr, operator, expr1) => {
-                print!("({} ", operator.lexeme);
-                self.visit_expr(*expr);
-                print!(" ");
-                self.visit_expr(*expr1);
-                print!(")");
-            }
-            Expr::Grouping(expr) => self.visit_grouping(*expr),
-            Expr::Name(token, _) => {
-                print!("{}", token.lexeme)
-            }
-            Expr::Assign(lhs, expr) => {
-                self.visit_expr(*lhs);
-                print!(" = ");
-                self.visit_expr(*expr)
-            }
-            Expr::Logical(expr1, token, expr2) => {
-                self.visit_expr(*expr1);
-                print!("{}", token.lexeme);
-                self.visit_expr(*expr2);
-            }
-            Expr::Call(_expr, _token, _vec) => todo!(),
-            Expr::Dotted(_, _, _) => todo!(),
-            Expr::This(_) => todo!(),
-            Expr::Super(_) => todo!(),
-        }
     }
 }

@@ -10,7 +10,6 @@ mod resolve;
 use interpreter::eval;
 use interpreter::Interpreter;
 use lexer::tokenize;
-use parser::{AstPrinter, Visit};
 use resolve::Resolver;
 
 fn main() {
@@ -51,8 +50,7 @@ fn main() {
             match cmd {
                 "parse" => match parser.parse_expr() {
                     Ok(expr) => {
-                        AstPrinter.visit_expr(expr);
-                        println!()
+                        println!("{expr}")
                     }
                     Err(parsing_error) => {
                         eprintln!("{parsing_error}");
