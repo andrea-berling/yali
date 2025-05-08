@@ -114,7 +114,6 @@ pub enum Expr {
     Call(Box<Expr>, Token, Vec<Expr>),
     Dotted(Token, Box<Expr>, Box<Expr>),
     This(Token),
-    // TODO: super should probably also include the name of the called method in its fields
     Super(Token, Token),
 }
 
@@ -338,7 +337,6 @@ impl Parser {
                 "false" => Ok(Expr::Literal(LiteralExpr::False)),
                 "nil" => Ok(Expr::Literal(LiteralExpr::Nil)),
                 "this" => Ok(Expr::This(token.clone())),
-                // TODO: you can parse the full super.<expr> expression as a dotted here
                 "super" => Ok(Expr::Super(token.clone(), {
                     expect!(self, TT::Dot);
                     expect!(self, TT::Identifier).clone()
@@ -411,8 +409,6 @@ impl Parser {
             Ok(Expr::Unary(operator, Box::new(self.unary()?)))
         } else {
             let previous_position = self.position;
-            self.peek();
-            self.peek2();
             match self.lhs() {
                 Err(ParsingError {
                     error: InvalidLhs(Some(expr)),
@@ -420,7 +416,6 @@ impl Parser {
                 })
                 | Ok(expr) => Ok(expr),
                 _ => {
-                    // TODO: revise
                     self.set_position(previous_position);
                     self.call_or_ident(false, false)
                 }

@@ -175,12 +175,14 @@ impl Resolver {
                     self.context.in_subclass = true;
                 }
                 self.define(token);
+                self.add_scope();
                 let Statement::Block(body) = statement else {
                     return Err(ResolvingError::new(token, ExpectedBody));
                 };
                 for declaration in body {
                     self.resolve_declaration(declaration)?
                 }
+                self.pop_scope();
                 self.context = previous_context;
             }
         }

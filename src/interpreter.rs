@@ -22,9 +22,6 @@ pub enum Value {
         formal_args: Vec<Token>,
         body: Statement,
         environment: Rc<RefCell<Environment>>,
-        // TODO: just put it into the environment
-        this: Option<Rc<RefCell<Value>>>,
-        class: Option<Rc<RefCell<Value>>>,
     },
     Class {
         name: String,
@@ -49,14 +46,12 @@ impl Debug for Value {
                 ref name,
                 ref formal_args,
                 ref environment,
-                ref this,
                 ..
             } => f
                 .debug_struct("Fn")
                 .field("name", name)
                 .field("format_args", formal_args)
                 .field("environment", environment)
-                .field("this", this)
                 .finish(),
             Value::Class {
                 name,
@@ -84,14 +79,6 @@ impl From<Value> for Rc<RefCell<Value>> {
 }
 
 impl Value {
-    pub fn get_this(&self) -> Option<Rc<RefCell<Value>>> {
-        if let Value::Fn { this, .. } = self {
-            this.clone()
-        } else {
-            None
-        }
-    }
-
     pub fn get_name(&self) -> Option<String> {
         match self {
             Value::Fn { name, .. } | Value::Class { name, .. } => Some(name.clone()),
@@ -118,7 +105,6 @@ impl Value {
     pub fn get_class(&self) -> Option<Rc<RefCell<Value>>> {
         match self {
             Value::ClassInstance { class, .. } => Some(class.clone()),
-            Value::Fn { class, .. } => class.clone(),
             _ => None,
         }
     }
@@ -177,14 +163,14 @@ pub enum EvalErrorType {
     UndefinedField,
     #[error("Undefined method")]
     UndefinedMethod,
-    #[error("Invalid reference to this")]
-    InvalidReferenceToThis,
     #[error("Can only call functions and classes")]
     CantCallThis,
     #[error("Superclass must be a class")]
     SuperclassesMustBeClasses,
     #[error("No error")]
     EarlyExit(Rc<RefCell<Value>>),
+    #[error("Operand must be a class")]
+    OperandMustBeClass,
 }
 
 use thiserror::Error;
@@ -241,9 +227,19 @@ pub fn eval(expr: &Expr) -> Result<Value, EvalError> {
 pub struct Environment {
     parent: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Rc<RefCell<Value>>>,
-    // TODO: just make it a value in the env
-    pub this: Option<Rc<RefCell<Value>>>,
-    pub current_class: Option<Rc<RefCell<Value>>>,
+}
+
+impl Clone for Environment {
+    fn clone(&self) -> Self {
+        let mut values = HashMap::new();
+        for (key, value) in &self.values {
+            values.insert(key.clone(), value.borrow().clone().into());
+        }
+        Self {
+            parent: self.parent.clone(),
+            values,
+        }
+    }
 }
 
 impl Debug for Environment {
@@ -251,12 +247,20 @@ impl Debug for Environment {
         f.debug_struct("Environment")
             .field("values", &self.values.keys())
             .field(
+                "this",
+                &self.values.get("this").map(|x| {
+                    x.borrow()
+                        .get_properties()
+                        .cloned()
+                        .map(|x| x.keys().cloned().collect::<Vec<_>>())
+                        .clone()
+                }),
+            )
+            .field(
                 "parent_addr",
                 &self.parent.as_ref().map(|this| this.as_ptr()),
             )
             .field("parent", &self.parent)
-            .field("this", &self.this)
-            .field("current_class", &self.current_class)
             .finish()
     }
 }
@@ -264,10 +268,6 @@ impl Debug for Environment {
 #[derive(Debug)]
 pub enum Callable {
     Class(Rc<RefCell<Value>>),
-    Method {
-        method: Rc<RefCell<Value>>,
-        class: Rc<RefCell<Value>>,
-    },
     Function(Rc<RefCell<Value>>),
 }
 
@@ -288,8 +288,6 @@ impl Environment {
                     formal_args: vec![],
                     body: Statement::Block(vec![]),
                     environment: Default::default(),
-                    this: None,
-                    class: None,
                 }
                 .into(),
                 true,
@@ -483,17 +481,12 @@ impl<'a> Interpreter<'a> {
                         formal_args: args.clone(),
                         body: body.clone(),
                         environment: self.current_environment.clone(),
-                        this: None,
-                        class: None,
                     }
                     .into(),
                     true,
                 );
                 Ok(())
             }
-            // TODO: you can create a new environment in which to put the "super" definition here
-            // when evaluating the methods, that environment points to the current environment, and
-            // it's the environment of the function
             Declaration::Class(name, superclass, body) => {
                 let superclass = if let Some(superclass) = superclass {
                     let Expr::Name(superclass_token, _) = &superclass else {
@@ -510,6 +503,11 @@ impl<'a> Interpreter<'a> {
                 let Statement::Block(body) = body else {
                     todo!();
                 };
+                let mut new_env = Environment::default();
+                if let Some(superclass) = superclass.as_ref() {
+                    new_env.set("super", superclass.clone(), true);
+                }
+                self.add_environment(new_env);
                 let new_class: Rc<RefCell<Value>> = Value::Class {
                     name: name.lexeme.clone(),
                     superclass,
@@ -526,14 +524,13 @@ impl<'a> Interpreter<'a> {
                                     formal_args: args.clone(),
                                     body: body.clone(),
                                     environment: self.current_environment.clone(),
-                                    this: None,
-                                    class: Some(new_class.clone()),
                                 }
                                 .into(),
                             );
                         }
                     }
                 }
+                self.pop_environment();
                 self.set_var(&name.lexeme, new_class, true);
                 Ok(())
             }
@@ -542,28 +539,6 @@ impl<'a> Interpreter<'a> {
 
     pub fn run(&mut self, program: &Program) -> RuntimeResult {
         self.statement(program)
-    }
-
-    pub fn get_this(&self) -> Option<Rc<RefCell<Value>>> {
-        let mut cur_env = self.current_environment.clone();
-        let mut this = cur_env.borrow().this.clone();
-        while this.is_none() && cur_env.borrow().parent.is_some() {
-            let tmp = cur_env.borrow().parent.as_ref().unwrap().clone();
-            this = tmp.borrow().this.clone();
-            cur_env = tmp;
-        }
-        this
-    }
-
-    pub fn get_super(&self) -> Option<Rc<RefCell<Value>>> {
-        let mut cur_env = self.current_environment.clone();
-        let mut current_class = cur_env.borrow().current_class.clone();
-        while current_class.is_none() && cur_env.borrow().parent.is_some() {
-            let tmp = cur_env.borrow().parent.as_ref().unwrap().clone();
-            current_class = tmp.borrow().current_class.clone();
-            cur_env = tmp;
-        }
-        current_class.and_then(|class| class.borrow().get_superclass())
     }
 
     pub fn eval_expr(&mut self, expr: &Expr) -> EvalResult {
@@ -703,12 +678,12 @@ impl<'a> Interpreter<'a> {
                     let rhs = self.eval_expr(expr)?;
                     match tail.as_ref() {
                         Expr::Literal(_)
-                        | Expr::Unary(_, _)
-                        | Expr::Binary(_, _, _)
-                        | Expr::Logical(_, _, _)
-                        | Expr::Assign(_, _)
+                        | Expr::Unary(..)
+                        | Expr::Binary(..)
+                        | Expr::Logical(..)
+                        | Expr::Assign(..)
                         | Expr::Grouping(_)
-                        | Expr::Call(_, _, _) => todo!("Can't be"),
+                        | Expr::Call(..) => todo!("Can't be"),
                         Expr::Name(token, _) => {
                             class_instance
                                 .borrow_mut()
@@ -717,11 +692,11 @@ impl<'a> Interpreter<'a> {
                                 .insert(token.lexeme.clone(), rhs.clone());
                             Ok(rhs)
                         }
-                        Expr::Dotted(_, _, _) => {
+                        Expr::Dotted(..) => {
                             todo!()
                         }
                         Expr::This(_) => todo!(),
-                        Expr::Super(_, _) => todo!(),
+                        Expr::Super(..) => todo!(),
                     }
                 }
                 _ => todo!("Invalid assingee"),
@@ -748,21 +723,8 @@ impl<'a> Interpreter<'a> {
                     Value::Fn { name, .. } | Value::Class { name, .. } if is_primitive(name) => {
                         eval_primitive_function(name, token)
                     }
-                    Value::Fn { this, class, .. } if class.is_some() => self.call(
-                        &Callable::Method {
-                            method: callable,
-                            class: class.as_ref().unwrap().clone(),
-                        },
-                        &call_args,
-                        this.clone(),
-                        token,
-                    ),
-                    Value::Fn { .. } => {
-                        self.call(&Callable::Function(callable), &call_args, None, token)
-                    }
-                    Value::Class { .. } => {
-                        self.call(&Callable::Class(callable), &call_args, None, token)
-                    }
+                    Value::Fn { .. } => self.call(&Callable::Function(callable), &call_args, token),
+                    Value::Class { .. } => self.call(&Callable::Class(callable), &call_args, token),
                     _ => Err(EvalError::new(token, UndefinedFunction))?,
                 }
             }
@@ -770,19 +732,35 @@ impl<'a> Interpreter<'a> {
                 let class_instance = self.eval_expr(head)?;
                 Ok(self.eval_expr_in_class_instance(class_instance, tail)?)
             }
-            Expr::This(token) => self
-                .get_this()
-                .ok_or(EvalError::new(token, InvalidReferenceToThis)),
-            Expr::Super(_, method) => self
-                .get_super()
-                .unwrap()
-                .borrow()
-                .get_methods()
-                .unwrap()
-                .get(&method.lexeme)
-                .cloned()
-                .ok_or(EvalError::new(method, UndefinedMethod)),
+            Expr::This(token) => match self.get_var(&token.lexeme) {
+                Some(value) => Ok(value),
+                None => Err(EvalError::new(token, UndefinedReference)),
+            },
+            Expr::Super(token, method) => match self.get_var(&token.lexeme) {
+                Some(value) => value
+                    .borrow()
+                    .get_methods()
+                    .unwrap()
+                    .get(&method.lexeme)
+                    .cloned()
+                    .ok_or(EvalError::new(method, UndefinedMethod)),
+                None => Err(EvalError::new(token, UndefinedReference)),
+            },
         }
+    }
+
+    fn bind_function(
+        function: &Rc<RefCell<Value>>,
+        this: &Rc<RefCell<Value>>,
+    ) -> Rc<RefCell<Value>> {
+        // Cloning data structures that have pointers is fun :D
+        let new_bound_function: Rc<RefCell<Value>> = function.borrow().clone().into();
+        if let Value::Fn { environment, .. } = &mut *new_bound_function.borrow_mut() {
+            let new_env = Rc::new(RefCell::new(environment.borrow().clone()));
+            *environment = new_env;
+            environment.borrow_mut().set("this", this.clone(), true);
+        }
+        new_bound_function.clone()
     }
 
     fn eval_expr_in_class_instance(
@@ -792,10 +770,10 @@ impl<'a> Interpreter<'a> {
     ) -> EvalResult {
         match expr {
             Expr::Literal(_)
-            | Expr::Unary(_, _)
-            | Expr::Binary(_, _, _)
-            | Expr::Logical(_, _, _)
-            | Expr::Assign(_, _)
+            | Expr::Unary(..)
+            | Expr::Binary(..)
+            | Expr::Logical(..)
+            | Expr::Assign(..)
             | Expr::Grouping(_) => todo!("Can't be"),
             Expr::Name(token, _) => {
                 if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
@@ -812,106 +790,36 @@ impl<'a> Interpreter<'a> {
                                 {
                                     match methods.get(&token.lexeme) {
                                         Some(method) => {
-                                            let mut new_bound_function = method.borrow().clone();
-                                            if let Value::Fn {
-                                                this,
-                                                class: fn_class,
-                                                ..
-                                            } = &mut new_bound_function
-                                            {
-                                                let _ = this.insert(class_instance.clone());
-                                                let _ = fn_class.insert(class.clone().unwrap());
-                                            }
-                                            return Ok(new_bound_function.into());
+                                            return Ok(Self::bind_function(
+                                                method,
+                                                &class_instance,
+                                            ));
                                         }
                                         None => class = superclass.clone(),
                                     }
-                                } else {
-                                    todo!();
                                 }
                             }
                             Err(EvalError::new(token, UndefinedField))?
                         }
                     }
                 } else {
-                    todo!()
+                    Err(EvalError::new_without_token(OperandMustBeClass))
                 }
             }
             Expr::Call(callee, token, args_exprs) => {
                 let callable = match callee.as_ref() {
-                    Expr::Name(callee_token, _) => {
-                        if let Value::ClassInstance { properties, class } =
-                            &*class_instance.borrow()
-                        {
-                            let mut method_class = class.clone();
-                            let mut method = properties.get(&callee_token.lexeme).cloned();
-                            if method.is_none() {
-                                let mut class = Some(class.clone());
-                                while class.is_some() {
-                                    if let Value::Class {
-                                        methods,
-                                        superclass,
-                                        ..
-                                    } = &*class.clone().unwrap().borrow()
-                                    {
-                                        match methods.get(&callee_token.lexeme) {
-                                            Some(class_method) => {
-                                                let mut new_bound_function =
-                                                    class_method.borrow().clone();
-                                                if let Value::Fn {
-                                                    this,
-                                                    class: fn_class,
-                                                    ..
-                                                } = &mut new_bound_function
-                                                {
-                                                    let _ = this.insert(class_instance.clone());
-                                                    let _ = fn_class.insert(class.clone().unwrap());
-                                                }
-                                                method = Some(new_bound_function.into());
-                                                method_class = class.clone().unwrap();
-                                                break;
-                                            }
-                                            None => class = superclass.clone(),
-                                        }
-                                    } else {
-                                        todo!();
-                                    }
-                                }
-                            }
-                            match method {
-                                Some(method) => Callable::Method {
-                                    method: method.clone(),
-                                    class: method_class,
-                                },
-                                None => {
-                                    return Err(EvalError::new(callee_token, UndefinedMethod));
-                                }
-                            }
-                        } else {
-                            todo!()
-                        }
-                    }
+                    Expr::Name(..) => Callable::Function(
+                        self.eval_expr_in_class_instance(class_instance.clone(), callee)?,
+                    ),
                     Expr::Call(sub_callee, sub_token, sub_args_exprs) => {
                         let mut call_args = vec![];
                         for expr in sub_args_exprs {
                             call_args.push((expr, self.eval_expr(expr)?))
                         }
-                        let method =
-                            self.eval_expr_in_class_instance(class_instance.clone(), sub_callee)?;
-                        let class = method.borrow().get_class().unwrap().clone();
-                        let method_callable = &Callable::Method {
-                            method: method.clone(),
-                            class: method.borrow().get_class().unwrap(),
-                        };
-                        Callable::Method {
-                            method: self.call(
-                                method_callable,
-                                &call_args,
-                                Some(class_instance.clone()),
-                                sub_token,
-                            )?,
-                            class,
-                        }
+                        let sub_callable = &Callable::Function(
+                            self.eval_expr_in_class_instance(class_instance.clone(), sub_callee)?,
+                        );
+                        Callable::Function(self.call(sub_callable, &call_args, sub_token)?)
                     }
                     _ => Err(EvalError::new(token, CantCallThis))?,
                 };
@@ -919,13 +827,13 @@ impl<'a> Interpreter<'a> {
                 for expr in args_exprs {
                     call_args.push((expr, self.eval_expr(expr)?))
                 }
-                self.call(&callable, &call_args, Some(class_instance.clone()), token)
+                self.call(&callable, &call_args, token)
             }
-            Expr::Dotted(_, _, _) => {
+            Expr::Dotted(..) => {
                 todo!()
             }
             Expr::This(_) => todo!(),
-            Expr::Super(_, _) => todo!(),
+            Expr::Super(..) => todo!(),
         }
     }
 
@@ -933,25 +841,21 @@ impl<'a> Interpreter<'a> {
         &mut self,
         callable: &Callable,
         call_args: &[(&Expr, Rc<RefCell<Value>>)],
-        this: Option<Rc<RefCell<Value>>>,
         token: &Token,
     ) -> Result<Rc<RefCell<Value>>, EvalError> {
         let callee = match callable {
-            Callable::Class(val)
-            | Callable::Method { method: val, .. }
-            | Callable::Function(val)
+            Callable::Class(val) | Callable::Function(val)
                 if matches!(&*val.borrow(), Value::Class { .. } | Value::Fn { .. }) =>
             {
                 val.clone()
             }
-            _ => todo!(),
+            _ => unreachable!(),
         };
         let Value::Fn {
-            name: callable_name,
+            name: function_name,
             formal_args,
             body,
             environment,
-            this: fn_this,
             ..
         } = &*callee.borrow()
         else {
@@ -964,8 +868,8 @@ impl<'a> Interpreter<'a> {
                 let new_instance: Rc<RefCell<Value>> = Value::ClassInstance {
                     class: callee.clone(),
                     properties: match superclass {
-                        Some(class) if methods.get("init").is_none() => self
-                            .call(&Callable::Class(class.clone()), call_args, None, token)?
+                        Some(superclass) if methods.get("init").is_none() => self
+                            .call(&Callable::Class(superclass.clone()), call_args, token)?
                             .borrow()
                             .get_properties()
                             .unwrap()
@@ -976,17 +880,8 @@ impl<'a> Interpreter<'a> {
                 .into();
 
                 if let Some(initializer) = methods.get("init") {
-                    if matches!(&*initializer.borrow(), Value::Fn { .. }) {
-                        self.call(
-                            &Callable::Method {
-                                method: initializer.clone(),
-                                class: callee.clone(),
-                            },
-                            call_args,
-                            Some(new_instance.clone()),
-                            token,
-                        )?;
-                    }
+                    let initializer = Self::bind_function(initializer, &new_instance);
+                    self.call(&Callable::Function(initializer.clone()), call_args, token)?;
                 }
                 return Ok(new_instance);
             } else {
@@ -1004,9 +899,7 @@ impl<'a> Interpreter<'a> {
         };
 
         let old_environment = self.current_environment.clone();
-        if !matches!(callable, Callable::Method { .. }) {
-            self.set_environment(environment.clone());
-        }
+        self.set_environment(environment.clone());
         let mut new_env = Environment::default();
         for (var_token, var_value) in zip(
             formal_args.clone(),
@@ -1019,15 +912,6 @@ impl<'a> Interpreter<'a> {
             new_env.set(&var_token.lexeme, var_value.clone(), true);
         }
 
-        if let Callable::Method { class, .. } = callable {
-            new_env.this = if let Some(this) = fn_this {
-                Some(this.clone())
-            } else {
-                this
-            };
-
-            new_env.current_class = Some(class.clone());
-        }
         self.add_environment(new_env);
 
         let env_before_running = self.current_environment.clone();
@@ -1049,47 +933,12 @@ impl<'a> Interpreter<'a> {
             };
         }
 
-        if matches!(callable, Callable::Method { .. }) && callable_name == "init" {
-            return_value = if let Some(this) = fn_this {
-                this.clone()
-            } else {
-                self.current_environment.borrow().this.clone().unwrap()
-            }
-        }
-
-        let mut values_to_update = vec![];
-
-        for (expr, formal_arg) in zip(
-            call_args
-                .iter()
-                .cloned()
-                .unzip::<&Expr, Rc<RefCell<Value>>, Vec<_>, Vec<_>>()
-                .0,
-            formal_args.clone(),
-        ) {
-            if let Some(val) = self.get_var(&formal_arg.lexeme) {
-                if matches!(&*val.borrow(), Value::ClassInstance { .. }) {
-                    values_to_update.push((expr, val.clone()));
-                }
-            }
+        if function_name == "init" {
+            return_value = self.get_var("this").unwrap().clone()
         }
 
         self.pop_environment();
-
-        if !matches!(callable, Callable::Method { .. }) {
-            self.set_environment(old_environment);
-        }
-
-        for (expr, value) in values_to_update {
-            if let Expr::Name(token, address) = expr {
-                self.assign_var(token, address, value);
-            } else if let Expr::Dotted(_, left, _) = expr {
-                if let Expr::Name(token, address) = left.as_ref() {
-                    self.assign_var(token, address, value);
-                }
-            }
-        }
-
+        self.set_environment(old_environment);
         Ok(return_value)
     }
 }
