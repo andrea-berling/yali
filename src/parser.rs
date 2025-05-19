@@ -254,6 +254,10 @@ pub enum ParsingErrorType {
     InvalidLhs(Option<Expr>),
     #[error("A class can't inherit from itself")]
     CantInheritFromSelf,
+    #[error("Unexpected grouping")]
+    UnexpectedGrouping,
+    #[error("Invalid declaration")]
+    InvalidDeclaration,
 }
 
 use ParsingErrorType::*;
@@ -388,7 +392,7 @@ impl Parser {
         }
         if let Expr::Grouping(_) = call_or_ident {
             if no_grouping {
-                todo!("No grouping allowed");
+                return self.error(UnexpectedGrouping);
             }
         }
         while next_token_matches!(self, TT::LeftParen) {
@@ -720,7 +724,7 @@ impl Parser {
         } else if self.peek().is_some() {
             Ok(Declaration::Statement(self.statement()?))
         } else {
-            todo!("Error handling")
+            self.error(InvalidDeclaration)
         }
     }
 

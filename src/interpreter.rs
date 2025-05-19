@@ -140,6 +140,22 @@ impl Value {
 }
 
 #[derive(Debug, Error)]
+pub enum InternalErrorType {
+    #[error("Malformed function body: should be a Block")]
+    FunctionBodyShouldBeABlock,
+    #[error("Malformed class body: should be a Block")]
+    ClassBodyShouldBeABlock,
+    #[error("Malformed lhs: can't assign to {0}")]
+    CantAssignTo(Expr),
+    #[error("Malformed expression: {0}")]
+    MalformedExpression(Expr),
+    #[error("Invalid class subexpression: {0}")]
+    InvalidClassSubexpression(Expr),
+}
+
+use InternalErrorType::*;
+
+#[derive(Debug, Error)]
 pub enum EvalErrorType {
     #[error("Invalid operator")]
     IvalidOperator,
@@ -171,6 +187,8 @@ pub enum EvalErrorType {
     EarlyExit(Rc<RefCell<Value>>),
     #[error("Operand must be a class")]
     OperandMustBeClass,
+    #[error("Internal error: {0}")]
+    InternalError(InternalErrorType),
 }
 
 use thiserror::Error;
@@ -501,7 +519,9 @@ impl<'a> Interpreter<'a> {
                     None
                 };
                 let Statement::Block(body) = body else {
-                    todo!();
+                    return Err(EvalError::new_without_token(InternalError(
+                        ClassBodyShouldBeABlock,
+                    )));
                 };
                 let mut new_env = Environment::default();
                 if let Some(superclass) = superclass.as_ref() {
@@ -677,13 +697,18 @@ impl<'a> Interpreter<'a> {
                     let class_instance = self.eval_expr(head)?;
                     let rhs = self.eval_expr(expr)?;
                     match tail.as_ref() {
-                        Expr::Literal(_)
+                        Expr::Literal(..)
                         | Expr::Unary(..)
                         | Expr::Binary(..)
                         | Expr::Logical(..)
                         | Expr::Assign(..)
-                        | Expr::Grouping(_)
-                        | Expr::Call(..) => todo!("Can't be"),
+                        | Expr::Grouping(..)
+                        | Expr::Call(..)
+                        | Expr::Dotted(..)
+                        | Expr::This(_)
+                        | Expr::Super(..) => Err(EvalError::new_without_token(InternalError(
+                            CantAssignTo(*expr.clone()),
+                        ))),
                         Expr::Name(token, _) => {
                             class_instance
                                 .borrow_mut()
@@ -692,14 +717,11 @@ impl<'a> Interpreter<'a> {
                                 .insert(token.lexeme.clone(), rhs.clone());
                             Ok(rhs)
                         }
-                        Expr::Dotted(..) => {
-                            todo!()
-                        }
-                        Expr::This(_) => todo!(),
-                        Expr::Super(..) => todo!(),
                     }
                 }
-                _ => todo!("Invalid assingee"),
+                _ => Err(EvalError::new_without_token(InternalError(CantAssignTo(
+                    *expr.clone(),
+                )))),
             },
             Expr::Logical(expr1, operator, expr2) => {
                 let result1 = self.eval_expr(expr1)?;
@@ -708,9 +730,9 @@ impl<'a> Interpreter<'a> {
                     (_, "or") => Ok(result1),
                     (Value::Nil | Value::Bool(false), "and") => Ok(result1),
                     (_, "and") => Ok(self.eval_expr(expr2)?),
-                    _ => {
-                        todo!("Shouldn't happen");
-                    }
+                    _ => Err(EvalError::new_without_token(InternalError(
+                        MalformedExpression(expr.clone()),
+                    ))),
                 }
             }
             Expr::Call(callee, token, args) => {
@@ -769,12 +791,17 @@ impl<'a> Interpreter<'a> {
         expr: &Expr,
     ) -> EvalResult {
         match expr {
-            Expr::Literal(_)
+            Expr::Literal(..)
             | Expr::Unary(..)
             | Expr::Binary(..)
             | Expr::Logical(..)
             | Expr::Assign(..)
-            | Expr::Grouping(_) => todo!("Can't be"),
+            | Expr::Grouping(..)
+            | Expr::Dotted(..)
+            | Expr::This(_)
+            | Expr::Super(..) => Err(EvalError::new_without_token(InternalError(
+                InvalidClassSubexpression(expr.clone()),
+            ))),
             Expr::Name(token, _) => {
                 if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
                     match properties.get(&token.lexeme) {
@@ -829,11 +856,6 @@ impl<'a> Interpreter<'a> {
                 }
                 self.call(&callable, &call_args, token)
             }
-            Expr::Dotted(..) => {
-                todo!()
-            }
-            Expr::This(_) => todo!(),
-            Expr::Super(..) => todo!(),
         }
     }
 
@@ -895,7 +917,9 @@ impl<'a> Interpreter<'a> {
             ));
         }
         let Statement::Block(declarations) = body.clone() else {
-            todo!();
+            return Err(EvalError::new_without_token(InternalError(
+                FunctionBodyShouldBeABlock,
+            )));
         };
 
         let old_environment = self.current_environment.clone();
