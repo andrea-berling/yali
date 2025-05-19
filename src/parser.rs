@@ -251,7 +251,7 @@ pub enum ParsingErrorType {
     #[error("Expected {expected}")]
     UnexpectedToken { expected: String },
     #[error("Invalid epxression on the left side of '='")]
-    InvalidLhs(Option<Expr>),
+    InvalidLhs(Option<Box<Expr>>),
     #[error("A class can't inherit from itself")]
     CantInheritFromSelf,
     #[error("Unexpected grouping")]
@@ -417,8 +417,8 @@ impl Parser {
                 Err(ParsingError {
                     error: InvalidLhs(Some(expr)),
                     ..
-                })
-                | Ok(expr) => Ok(expr),
+                }) => Ok(*expr),
+                Ok(expr) => Ok(expr),
                 _ => {
                     self.set_position(previous_position);
                     self.call_or_ident(false, false)
@@ -452,7 +452,7 @@ impl Parser {
                 )
             }
             if !next_token_matches!(self, TT::Equal) {
-                return self.error(InvalidLhs(Some(expr)));
+                return self.error(InvalidLhs(Some(expr.into())));
             }
             Ok(expr)
         } else {
@@ -497,7 +497,7 @@ impl Parser {
                     self.set_position(previous_position);
                     self.logic_or()
                 } else {
-                    Ok(expr)
+                    Ok(*expr)
                 }
             }
             _ => self.logic_or(),

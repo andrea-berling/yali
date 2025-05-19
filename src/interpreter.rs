@@ -146,11 +146,11 @@ pub enum InternalErrorType {
     #[error("Malformed class body: should be a Block")]
     ClassBodyShouldBeABlock,
     #[error("Malformed lhs: can't assign to {0}")]
-    CantAssignTo(Expr),
+    CantAssignTo(Box<Expr>),
     #[error("Malformed expression: {0}")]
-    MalformedExpression(Expr),
+    MalformedExpression(Box<Expr>),
     #[error("Invalid class subexpression: {0}")]
-    InvalidClassSubexpression(Expr),
+    InvalidClassSubexpression(Box<Expr>),
 }
 
 use InternalErrorType::*;
@@ -707,7 +707,7 @@ impl<'a> Interpreter<'a> {
                         | Expr::Dotted(..)
                         | Expr::This(_)
                         | Expr::Super(..) => Err(EvalError::new_without_token(InternalError(
-                            CantAssignTo(*expr.clone()),
+                            CantAssignTo(expr.clone()),
                         ))),
                         Expr::Name(token, _) => {
                             class_instance
@@ -720,7 +720,7 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 _ => Err(EvalError::new_without_token(InternalError(CantAssignTo(
-                    *expr.clone(),
+                    expr.clone(),
                 )))),
             },
             Expr::Logical(expr1, operator, expr2) => {
@@ -731,7 +731,7 @@ impl<'a> Interpreter<'a> {
                     (Value::Nil | Value::Bool(false), "and") => Ok(result1),
                     (_, "and") => Ok(self.eval_expr(expr2)?),
                     _ => Err(EvalError::new_without_token(InternalError(
-                        MalformedExpression(expr.clone()),
+                        MalformedExpression(expr.clone().into()),
                     ))),
                 }
             }
@@ -800,7 +800,7 @@ impl<'a> Interpreter<'a> {
             | Expr::Dotted(..)
             | Expr::This(_)
             | Expr::Super(..) => Err(EvalError::new_without_token(InternalError(
-                InvalidClassSubexpression(expr.clone()),
+                InvalidClassSubexpression(expr.clone().into()),
             ))),
             Expr::Name(token, _) => {
                 if let Value::ClassInstance { properties, class } = &*class_instance.borrow() {
