@@ -1,0 +1,20 @@
+LEFT_PAREN ( null
+NUMBER 79 79.0
+PLUS + null
+NUMBER 58 58.0
+RIGHT_PAREN ) null
+GREATER > null
+NUMBER 84 84.0
+BANG_EQUAL != null
+LEFT_PAREN ( null
+STRING "Success" Success
+BANG_EQUAL != null
+STRING "Failure" Failure
+RIGHT_PAREN ) null
+BANG_EQUAL != null
+LEFT_PAREN ( null
+NUMBER 10 10.0
+GREATER_EQUAL >= null
+NUMBER 69 69.0
+RIGHT_PAREN ) null
+EOF  null

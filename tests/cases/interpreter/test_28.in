@@ -1,0 +1,7 @@
+// This program tests that the assignment operator returns the value that was assigned
+// And prints the value of the variable after each assignment
+var foo;
+foo = 1;
+print foo;
+print foo = 2;
+print foo;

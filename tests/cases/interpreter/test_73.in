@@ -1,0 +1,2 @@
+print clock() > 1745601190;
+print clock() > 1845601190;

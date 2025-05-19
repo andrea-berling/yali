@@ -93,7 +93,7 @@ fn main() {
                         exit_code = 65;
                     }
                 },
-                _ => panic!("Impossible"),
+                _ => unreachable!(),
             }
         }
 

@@ -1,0 +1,10 @@
+// This program uses if conditions to get the stage
+// of a person's life based on their age, and then<|SPACE|>// prints if they are eligible for voting
+var stage = "unknown";
+var age = 56;
+if (age < 18) { stage = "child"; }
+if (age >= 18) { stage = "adult"; }
+print stage;
+var isAdult = age >= 18;
+if (isAdult) { print "eligible for voting: true"; }
+if (!isAdult) { print "eligible for voting: false"; }

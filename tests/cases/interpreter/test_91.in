@@ -1,0 +1,4 @@
+// This program is missing the opening parenthesis for the function call,
+// and has extra closing parentheses
+// Hence the compiler error
+print clock)));

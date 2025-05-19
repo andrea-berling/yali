@@ -1,0 +1,2 @@
+// This program prints the result of an arithmetic expression
+print (75 * 2 + 47 * 2) / (2);

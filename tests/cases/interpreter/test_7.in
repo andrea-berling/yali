@@ -1,0 +1,12 @@
+// This program prints the result of a comparison operation
+// It also tests multi-line strings and non-ASCII characters
+print false != false;
+print "98
+11
+49
+";
+print "There should be an empty line above this.";
+print "(" + "" + ")";
+
+print "non-ascii: ॐ";
+

@@ -1,0 +1,4 @@
+// This program prints the result of arithmetic operations involving strings and integers
+print "quz" + "world" + "baz";
+print 78 - 96;
+print "baz" == "hello";

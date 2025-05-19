@@ -1,0 +1,5 @@
+// This program tests statements that don't have any side effects
+57 - 81 >= -85 * 2 / 85 + 47;
+true == true;
+("foo" == "world") == ("quz" != "baz");
+print true;

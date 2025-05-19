@@ -1,0 +1,4 @@
+// This program tests that the + operator is only supported when both operands are numbers or both are strings
+print "the expression below is invalid";
+16 + "foo";
+print "this should not be printed";

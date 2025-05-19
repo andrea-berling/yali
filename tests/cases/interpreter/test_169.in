@@ -1,0 +1,22 @@
+class world {
+  inworld() {
+    print "from world";
+  }
+}
+class hello < world {
+  inhello() {
+    print "from hello";
+  }
+}
+class foo < hello {
+  infoo() {
+    print "from foo";
+  }
+}
+// foo should inherit the methods
+// from both world and hello
+var foo = foo();
+foo.inworld();
+foo.inhello();
+foo.infoo();
+

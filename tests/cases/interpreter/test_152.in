@@ -1,0 +1,7 @@
+class Person {
+  sayName() {
+    // this is not a callable object
+    print this(); // expect runtime error
+  }
+}
+Person().sayName();

@@ -1,0 +1,15 @@
+class Superhero {}
+var batman = Superhero();
+var superman = Superhero();
+// Setting properties on an instance should work
+batman.name = "Batman";
+batman.called = 90;
+// Setting properties on an instance should work
+superman.name = "Superman";
+superman.called = 43;
+// Getting properties on an instance should work
+print "Times " + superman.name + " was called: ";
+print superman.called;
+print "Times " + batman.name + " was called: ";
+print batman.called;
+

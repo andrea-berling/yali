@@ -1,0 +1,7 @@
+IDENTIFIER _123foo null
+IDENTIFIER _hello null
+NUMBER 6 6.0
+IDENTIFIER ar null
+IDENTIFIER f00 null
+IDENTIFIER bar null
+EOF  null

@@ -1,0 +1,16 @@
+// Due to the compile error on line 17
+// Nothing should be printed
+var a = "1";
+print a;
+var a;
+print a;
+var a = "2";
+print a;
+{
+  // First declaration in local scope
+  var a = "1";
+
+  // Attempting to redeclare in local scope
+  var a = "2"; // This should be a compile error
+  print a;
+}

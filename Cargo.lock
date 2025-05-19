@@ -15,16 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 
 [[package]]
-name = "codecrafters-interpreter"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "const-str",
- "thiserror",
-]
-
-[[package]]
 name = "const-str"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,3 +95,13 @@ name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
+
+[[package]]
+name = "yali"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "const-str",
+ "thiserror",
+]

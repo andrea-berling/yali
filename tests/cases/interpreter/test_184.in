@@ -1,0 +1,10 @@
+class A {
+  method() {}
+}
+class B < A {
+  method() {
+    // super must be followed by `.`
+    // and an expression
+    (super).method(); // expect compile error
+  }
+}

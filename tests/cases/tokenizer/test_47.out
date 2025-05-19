@@ -1,0 +1,6 @@
+LESS < null
+GREATER > null
+GREATER_EQUAL >= null
+LESS < null
+LESS_EQUAL <= null
+EOF  null

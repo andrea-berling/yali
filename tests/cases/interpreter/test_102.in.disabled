@@ -1,0 +1,2 @@
+// This program tries to execute an integer as a function
+78();

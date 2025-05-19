@@ -1,0 +1,10 @@
+class Calculator {
+  add(a, b) {
+    // this should be bound to the instance
+    return a + b + this.memory;
+  }
+}
+var calc = Calculator();
+// Instance properties should be accessible using<|SPACE|>// the this keyword
+calc.memory = 11;
+print calc.add(70, 1);

@@ -1,0 +1,8 @@
+LEFT_PAREN ( null
+STRING "bar" bar
+PLUS + null
+STRING "baz" baz
+RIGHT_PAREN ) null
+BANG_EQUAL != null
+STRING "other_string" other_string
+EOF  null

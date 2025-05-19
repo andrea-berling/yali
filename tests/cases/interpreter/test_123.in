@@ -1,0 +1,5 @@
+// Function parameters are considered variables in the function's scope
+fun foo(a) {
+  // Attempting to declare a variable with same name as parameter
+  var a; // This should be a compile error
+}

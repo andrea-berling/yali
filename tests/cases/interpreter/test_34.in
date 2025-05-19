@@ -1,0 +1,9 @@
+// This program tests that scopes can be nested
+{
+  var world = 37;
+  {
+    var foo = 37;
+    print foo;
+  }
+  print world;
+}

@@ -1,0 +1,6 @@
+// This program declares a variable and prints its value
+// It also uses a previously declared variable's value to initialize a new variable
+var quz = "after";
+var quz = "before";
+var quz = quz;
+print quz;

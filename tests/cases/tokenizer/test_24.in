@@ -1,0 +1,8 @@
+var result = (a + b) > 7 or "Success" != "Failure" or x >= 5
+while (result) {
+    var counter = 0
+    counter = counter + 1
+    if (counter == 10) {
+        return nil
+    }
+}

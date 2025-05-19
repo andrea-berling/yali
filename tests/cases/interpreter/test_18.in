@@ -1,0 +1,5 @@
+// This program tries to access a variable before it is declared
+// It leads to a runtime error
+var foo = 42;
+var result = (foo + baz) / quz;
+print result;

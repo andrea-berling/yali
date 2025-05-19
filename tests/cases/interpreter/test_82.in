@@ -1,0 +1,4 @@
+// This program defines a simple function that doesn't take any arguments
+// and then invokes the function
+fun world() { print 31; }
+world();

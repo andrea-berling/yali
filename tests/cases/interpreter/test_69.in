@@ -1,0 +1,3 @@
+// This program would give a compile error
+// because the variable declaration is not inside a block
+for (;;) var foo;

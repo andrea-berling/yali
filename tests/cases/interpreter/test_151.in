@@ -1,0 +1,4 @@
+// using this outside of a class shouldn't work
+fun notAMethod() {
+  print this; // expect compile error
+}

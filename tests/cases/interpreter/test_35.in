@@ -1,0 +1,9 @@
+// This program tests that scopes are properly closed
+// Here the inner scope is missing a closing curly brace
+// Which leads to a compilation error
+{
+  var bar = 33;
+  var world = 33;
+  {
+    print bar + world;
+  }

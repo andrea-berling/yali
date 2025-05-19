@@ -1,0 +1,5 @@
+// This program tests that curly braces can be used to group multiple statements into blocks
+{
+  var hello = "foo";
+  print hello;
+}

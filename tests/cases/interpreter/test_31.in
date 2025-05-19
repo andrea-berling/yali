@@ -1,0 +1,9 @@
+// This program tests that the assignment operator returns the value that was assigned
+// So, it can be used multiple times in a single statement
+var hello = 72;
+var quz;
+var bar;
+hello = quz = bar = hello * 2;
+print hello;
+print quz;
+print quz;

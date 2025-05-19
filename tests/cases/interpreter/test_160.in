@@ -1,0 +1,7 @@
+class Foo {
+  init() {
+    // constructor should not return anything
+    return "something"; // expect compile error
+  }
+}
+Foo();

@@ -1,0 +1,4 @@
+// This program tries to access a variable before it is declared
+// It leads to a runtime error
+print 43;
+print x;

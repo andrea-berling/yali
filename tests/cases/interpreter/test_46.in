@@ -1,0 +1,16 @@
+// This program converts a random integer from Celsius to Fahrenheit
+// and prints the result. It also prints a message based on the temperature.
+var celsius = 16;
+var fahrenheit = 0;
+var isHot = false;
+{
+  fahrenheit = celsius * 9 / 5 + 32;
+  print celsius; print fahrenheit;
+  if (celsius > 30) {
+    isHot = true;
+    print "It's a hot day. Stay hydrated!";
+  } else {
+    print "It's cold today. Wear a jacket!";
+  }
+  if (isHot) { print "Remember to use sunscreen!"; }
+}

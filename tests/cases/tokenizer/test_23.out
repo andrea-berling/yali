@@ -1,0 +1,20 @@
+VAR var null
+IDENTIFIER greeting null
+EQUAL = null
+STRING "Hello" Hello
+IF if null
+LEFT_PAREN ( null
+IDENTIFIER greeting null
+EQUAL_EQUAL == null
+STRING "Hello" Hello
+RIGHT_PAREN ) null
+LEFT_BRACE { null
+RETURN return null
+TRUE true null
+RIGHT_BRACE } null
+ELSE else null
+LEFT_BRACE { null
+RETURN return null
+FALSE false null
+RIGHT_BRACE } null
+EOF  null

@@ -1,0 +1,3 @@
+// Class declaration with empty body
+class Spaceship {}
+print Spaceship;

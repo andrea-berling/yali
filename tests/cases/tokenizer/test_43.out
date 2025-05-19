@@ -1,0 +1,10 @@
+BANG ! null
+LEFT_BRACE { null
+BANG ! null
+RIGHT_BRACE } null
+LEFT_PAREN ( null
+BANG_EQUAL != null
+EQUAL_EQUAL == null
+RIGHT_PAREN ) null
+EQUAL = null
+EOF  null

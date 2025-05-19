@@ -1,0 +1,6 @@
+// This should print the string if the condition evaluates to True
+if (false) print "baz";
+// This should print "block body" if the condition evaluates to True
+if (true) {
+  print "block body";
+}

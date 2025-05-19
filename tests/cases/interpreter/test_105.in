@@ -1,0 +1,2 @@
+// This program tries to execute a boolean as a function
+(false == false)();

@@ -1,0 +1,9 @@
+LEFT_PAREN ( null
+LEFT_BRACE { null
+EQUAL = null
+RIGHT_BRACE } null
+RIGHT_PAREN ) null
+LEFT_BRACE { null
+EQUAL_EQUAL == null
+RIGHT_BRACE } null
+EOF  null

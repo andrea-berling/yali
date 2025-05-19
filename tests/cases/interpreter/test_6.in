@@ -1,0 +1,4 @@
+// This program tests that leading whitespace are ignored while executing
+print 72;
+print 72 + 44;
+print 72 + 44 + 54;

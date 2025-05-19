@@ -1,0 +1,2 @@
+// The this keyword used outside of a class<|SPACE|>// should be a compile error
+print this;

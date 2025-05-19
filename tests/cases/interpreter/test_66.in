@@ -1,0 +1,4 @@
+// This program uses a for loop to print the numbers from 0 to 3
+for (var foo = 0; foo < 3; foo = foo + 1) {
+  print foo;
+}

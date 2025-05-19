@@ -1,0 +1,2 @@
+// This program prints the result of the concatenation of three strings
+print "world" + "quz" + "foo";

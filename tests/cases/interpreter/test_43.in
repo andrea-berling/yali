@@ -1,0 +1,2 @@
+// This program uses a random boolean to decide which branch to execute,<|SPACE|>// and then prints the appropriate string
+if (true) print "if branch"; else print "else branch";

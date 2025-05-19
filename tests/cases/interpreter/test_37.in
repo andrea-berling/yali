@@ -1,0 +1,9 @@
+// This program tests variable shadowing across nested scopes
+{
+  var quz = "before";
+  {
+    var quz = "after";
+    print quz;
+  }
+  print quz;
+}

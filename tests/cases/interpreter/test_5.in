@@ -1,0 +1,4 @@
+// This program tests the syntax of multiple statements in a single line
+print "foo"; print true;
+print false;
+print "baz"; print 78;

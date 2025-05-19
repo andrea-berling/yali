@@ -1,0 +1,17 @@
+// This program tests that when a variable is declared in an outer scope,
+// it can be used in an inner scope
+// But when a variable is declared in an inner scope,
+// it can't be used in an outer scope
+{
+  var world = "outer world";
+  var quz = "outer quz";
+  {
+    world = "modified world";
+    var quz = "inner quz";
+    print world;
+    print quz;
+  }
+  print world;
+  print quz;
+}
+print world;

@@ -1,0 +1,4 @@
+// This program assigns the result of an arithmetic expression to a variable
+// Then it prints the value of the variable
+var world = (8 * (86 + 86)) / 4 + 86;
+print world;

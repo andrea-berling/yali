@@ -1,0 +1,9 @@
+// This program relies on the fact that assignments return the assigned value
+// And that the logical OR operator short-circuits
+// So, if the first assignment is truthy, it wouldn't proceed to the subsequent assignments
+// And then prints the assigned values
+var a = "world";
+var b = "world";
+(a = false) or (b = true) or (a = "world");
+print a;
+print b;

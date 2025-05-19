@@ -1,0 +1,8 @@
+LEFT_PAREN ( null
+RIGHT_PAREN ) null
+RIGHT_BRACE } null
+LEFT_BRACE { null
+LEFT_PAREN ( null
+RIGHT_BRACE } null
+LEFT_BRACE { null
+EOF  null

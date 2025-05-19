@@ -1,0 +1,6 @@
+foo: Starting
+foo: Processing
+foo: Finishing
+foo: Extra line
+baz: Failed!
+baz: Retrying...

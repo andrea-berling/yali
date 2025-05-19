@@ -1,0 +1,35 @@
+// This program demonstrates the use of closures to create an accumulator function.
+// The inner function accumulate() has access to the outer function's local variables sum and count.
+// This is an example of how closures can be used to create private variables and methods.
+fun makeAccumulator(label) {
+  var sum = 0;
+  var count = 0;
+  fun accumulate(value) {
+    sum = sum + value;
+    count = count + 1;
+    print label;
+    print count;
+    print sum;
+    print sum;
+    if (count > 3) {
+      print "reset";
+      sum = 0;
+      count = 0;
+    }
+
+    return sum;
+  }
+
+  return accumulate;
+}
+
+var acc1 = makeAccumulator("First:");
+var acc2 = makeAccumulator("Second:");
+
+acc1(5);
+acc1(3);
+acc1(4);
+acc1(2);
+
+acc2(3);
+acc2(2);

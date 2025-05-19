@@ -1,0 +1,5 @@
+// This program declares variables and performs operations on them
+// Finally it prints the result of the operations
+var foo = 30;
+var world = foo;
+print world + foo;

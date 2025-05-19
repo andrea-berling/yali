@@ -1,0 +1,5 @@
+// This function declaration is missing the opening and closing braces
+// The body should always be inside a block
+// Hence the compiler error
+fun f() 41;
+print f();

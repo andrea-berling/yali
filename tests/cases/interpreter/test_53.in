@@ -1,0 +1,7 @@
+// The logical OR operator should return the first value that is truthy
+if (false or "ok") print "baz";
+if (nil or "ok") print "baz";
+if (false or false) print "bar";
+if (true or "bar") print "bar";
+if (56 or "hello") print "hello";
+if ("hello" or "hello") print "hello";

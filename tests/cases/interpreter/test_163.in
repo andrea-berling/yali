@@ -1,0 +1,11 @@
+{
+  class A {}
+  // B is a subclass of A
+  class B < A {}
+  // C is also a subclass of A
+  class C < A {}
+  print A();
+  print B();
+  print C();
+}
+

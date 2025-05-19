@@ -1,0 +1,10 @@
+// This program tests that blocks can be used to group statements and variables
+// creating local scopes
+{
+  var world = "before";
+  print world;
+}
+{
+  var world = "after";
+  print world;
+}

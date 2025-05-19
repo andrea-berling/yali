@@ -1,0 +1,8 @@
+// This program tests that nested scopes can be created
+// and that local variables can be accessed
+var world = (50 * 31) - 87;
+{
+  var baz = "quz" + "10";
+  print baz;
+}
+print world;

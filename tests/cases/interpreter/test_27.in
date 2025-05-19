@@ -1,0 +1,3 @@
+// This program declares a variable and initializes it with the value of another variable
+// But as the variable is not declared before it is used it leads to a runtime error
+var world = quz;

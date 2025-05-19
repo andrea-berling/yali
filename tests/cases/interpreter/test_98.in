@@ -1,0 +1,13 @@
+// This program creates a function that returns another function
+// and uses it to greet two different people with two different greetings
+var globalGreeting = "Hello";
+fun makeGreeter() {
+  fun greet(name) {
+    print globalGreeting + " " + name;
+  }
+  return greet;
+}
+var sayHello = makeGreeter();
+sayHello("Bob");
+sayHello("Alice");
+sayHello("Eve");

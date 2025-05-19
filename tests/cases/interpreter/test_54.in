@@ -1,0 +1,7 @@
+// This program uses the logical OR operator to print the first value that is truthy
+print 91 or true;
+print false or 91;
+print false or false or true;
+print false or false;
+print false or false or false;
+print false or false or false or false;

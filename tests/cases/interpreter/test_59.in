@@ -1,0 +1,9 @@
+// This program relies on the fact that assignments return the assigned value
+// And that the logical AND operator short-circuits
+// So, when it encounters a falsy value, it wouldn't proceed to the subsequent assignments
+// And then prints the assigned values
+var a = "hello";
+var b = "hello";
+(a = true) and (b = false) and (a = "bad");
+print a;
+print b;
