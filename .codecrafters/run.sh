@@ -8,4 +8,4 @@
 
 set -e # Exit on failure
 
-exec /tmp/codecrafters-build-interpreter-rust/release/codecrafters-interpreter "$@"
+exec /tmp/codecrafters-build-interpreter-rust/release/yali "$@"
